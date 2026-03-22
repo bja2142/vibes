@@ -1,0 +1,10 @@
+Pillow
+pytesseract
+reportlab
+google-genai
+python-dotenv
+fastapi
+uvicorn
+sqlalchemy
+jinja2
+python-multipart

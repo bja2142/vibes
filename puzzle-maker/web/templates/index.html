@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Word Search AI Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        .loading-spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border-left-color: #3b82f6;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .check-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+            color: #6b7280;
+            transition: all 0.3s;
+        }
+        .check-item.completed {
+            color: #10b981;
+            font-weight: bold;
+        }
+        .check-item.active {
+            color: #3b82f6;
+            font-weight: bold;
+        }
+        .check-icon {
+            margin-right: 0.75rem;
+            width: 1.25rem;
+            height: 1.25rem;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900 font-sans">
+
+    <!-- Header -->
+    <header class="bg-white border-b border-gray-200 py-6 mb-8">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-900 tracking-tight">Word Search AI Factory</h1>
+                <p class="mt-2 text-sm text-gray-500">Create beautiful, themed word searches for any age.</p>
+            </div>
+            <a href="/" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-bold transition-colors">Refresh Dashboard</a>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12">
+        
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            <!-- Generation Form -->
+            <div class="lg:col-span-1">
+                <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm sticky top-8">
+                    <h2 class="text-xl font-semibold mb-6 border-b pb-4">Generate New</h2>
+                    
+                    <form id="gen-form" class="space-y-5">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Theme</label>
+                            <input type="text" id="theme-input" name="theme" required placeholder="e.g. Ancient Egypt, Corgis" 
+                                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all">
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Age Level</label>
+                                <select id="age-select" name="age" onchange="updateAgePresets()" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                                    {% for age in age_levels %}
+                                    <option value="{{ age }}" {% if age == '8-10' %}selected{% endif %}>{{ age }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Art Style</label>
+                                <select name="style" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                                    {% for style in art_styles %}
+                                    <option value="{{ style }}" {% if style == 'cartoon' %}selected{% endif %}>{{ style.capitalize() }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Custom Words Toggle -->
+                        <div class="pt-2">
+                            <label class="flex items-center cursor-pointer group">
+                                <div class="relative">
+                                    <input type="checkbox" id="custom-words-toggle" name="use_custom_words" class="sr-only peer" onchange="toggleCustomWords()">
+                                    <div class="w-10 h-5 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                                </div>
+                                <span class="ml-3 text-sm font-medium text-gray-700">Provide my own words (CSV)</span>
+                            </label>
+                            <div id="custom-words-container" class="hidden mt-3">
+                                <textarea name="custom_words" rows="3" placeholder="word1, word2, word3..." 
+                                          class="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Word Count</label>
+                                <input type="number" name="num_words" min="6" max="33" step="3" placeholder="Auto" 
+                                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Grid Density</label>
+                                <input type="number" name="multiplier" min="1.5" max="5.0" step="0.1" value="2.5" 
+                                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                            </div>
+                        </div>
+
+                        <!-- Manual Overrides -->
+                        <div class="p-4 bg-gray-50 rounded-lg border border-gray-100">
+                            <h3 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Placement Overrides</h3>
+                            <div class="grid grid-cols-2 gap-2">
+                                <label class="flex items-center text-xs text-gray-600"><input type="checkbox" name="h_fwd" id="chk-h_fwd" class="mr-2"> Horiz Fwd</label>
+                                <label class="flex items-center text-xs text-gray-600"><input type="checkbox" name="h_rev" id="chk-h_rev" class="mr-2"> Horiz Rev</label>
+                                <label class="flex items-center text-xs text-gray-600"><input type="checkbox" name="v_fwd" id="chk-v_fwd" class="mr-2"> Vert Fwd</label>
+                                <label class="flex items-center text-xs text-gray-600"><input type="checkbox" name="v_rev" id="chk-v_rev" class="mr-2"> Vert Rev</label>
+                                <label class="flex items-center text-xs text-gray-600"><input type="checkbox" name="d_fwd_r" id="chk-d_fwd_r" class="mr-2"> Diag Fwd R</label>
+                                <label class="flex items-center text-xs text-gray-600"><input type="checkbox" name="d_fwd_l" id="chk-d_fwd_l" class="mr-2"> Diag Fwd L</label>
+                                <label class="flex items-center text-xs text-gray-600"><input type="checkbox" name="d_rev_r" id="chk-d_rev_r" class="mr-2"> Diag Rev R</label>
+                                <label class="flex items-center text-xs text-gray-600"><input type="checkbox" name="d_rev_l" id="chk-d_rev_l" class="mr-2"> Diag Rev L</label>
+                                <label class="flex items-center text-xs font-bold text-blue-600 col-span-2"><input type="checkbox" name="overlap" id="chk-overlap" class="mr-2"> Enable Word Overlaps</label>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Color Mode</label>
+                            <div class="flex items-center space-x-4">
+                                <label class="flex items-center">
+                                    <input type="radio" name="color_mode" value="color" checked class="w-4 h-4 text-blue-600">
+                                    <span class="ml-2 text-sm text-gray-600">Full Color</span>
+                                </label>
+                                <label class="flex items-center">
+                                    <input type="radio" name="color_mode" value="bw" class="w-4 h-4 text-blue-600">
+                                    <span class="ml-2 text-sm text-gray-600">B&W</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="space-y-3 pt-2">
+                            <label class="flex items-center cursor-pointer group">
+                                <div class="relative">
+                                    <input type="checkbox" id="review-words-chk" name="review_words" class="sr-only peer">
+                                    <div class="w-10 h-5 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-orange-500"></div>
+                                </div>
+                                <span class="ml-3 text-sm font-medium text-gray-700 group-hover:text-orange-600 transition-colors">Let me review words first</span>
+                            </label>
+
+                            <label class="flex items-center cursor-pointer group">
+                                <div class="relative">
+                                    <input type="checkbox" id="apply-style-chk" name="apply_style" class="sr-only peer" onchange="sessionStorage.setItem('apply_style', this.checked); document.getElementById('advanced-model-label').classList.toggle('hidden', !this.checked); document.getElementById('advanced-model-label').classList.toggle('flex', this.checked)">
+                                    <div class="w-10 h-5 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                                </div>
+                                <span class="ml-3 text-sm font-medium text-gray-700 group-hover:text-blue-600 transition-colors">Apply AI Styling (Nano Banana 2)</span>
+                            </label>
+
+                            <label id="advanced-model-label" class="hidden items-center cursor-pointer group">
+                                <div class="relative">
+                                    <input type="checkbox" name="use_advanced_model" class="sr-only peer">
+                                    <div class="w-10 h-5 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                                </div>
+                                <span class="ml-3 text-sm font-medium text-gray-700 group-hover:text-purple-600 transition-colors">Use Advanced Model (Pro)</span>
+                            </label>
+
+                            <label class="flex items-center cursor-pointer group">
+                                <div class="relative">
+                                    <input type="checkbox" name="ink_saver" class="sr-only peer">
+                                    <div class="w-10 h-5 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                                </div>
+                                <span class="ml-3 text-sm font-medium text-gray-700 group-hover:text-blue-600 transition-colors text-xs">Ink Saver Mode</span>
+                            </label>
+                        </div>
+
+                        <button type="button" onclick="startGeneration()" id="submit-btn"
+                                class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-blue-200 transition-all active:scale-[0.98]">
+                            Start Generation
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Gallery -->
+            <div class="lg:col-span-2">
+                
+                <!-- Search Bar -->
+                <div class="mb-8 flex items-center bg-white p-2 rounded-xl border border-gray-200 shadow-sm">
+                    <div class="pl-4 text-gray-400">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                    </div>
+                    <form action="/" method="GET" class="w-full">
+                        <input type="text" name="q" value="{{ search_query }}" placeholder="Search by theme, words, or style..." 
+                               class="w-full px-4 py-2 bg-transparent outline-none text-gray-700">
+                    </form>
+                </div>
+
+                <!-- Puzzle Grid -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 max-h-[calc(100vh-12rem)] overflow-y-auto pr-2" id="puzzle-gallery">
+                    {% for puzzle in puzzles %}
+                    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden hover:shadow-md transition-shadow group cursor-pointer" 
+                         onclick="openDetail('{{ puzzle.hash_id }}')">
+                        
+                        <!-- Thumbnail -->
+                        <div class="aspect-square bg-gray-100 relative overflow-hidden">
+                            {% if puzzle.status == 'completed' %}
+                                {% if puzzle.has_styled %}
+                                <img src="/storage/{{ puzzle.hash_id }}_styled.png" alt="{{ puzzle.theme }}" class="object-cover w-full h-full group-hover:scale-105 transition-transform duration-500">
+                                {% else %}
+                                <img src="/storage/{{ puzzle.hash_id }}_original.png" alt="{{ puzzle.theme }}" class="object-cover w-full h-full group-hover:scale-105 transition-transform duration-500">
+                                {% endif %}
+                            {% elif puzzle.status == 'pending' or puzzle.status == 'awaiting_review' %}
+                            <div class="absolute inset-0 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm">
+                                <div class="loading-spinner mb-4"></div>
+                                <span class="text-sm font-medium text-blue-600 animate-pulse">
+                                    {% if puzzle.status == 'awaiting_review' %}Waiting for Review{% else %}AI is thinking...{% endif %}
+                                </span>
+                            </div>
+                            {% elif puzzle.status == 'failed_styling' %}
+                            <div class="absolute inset-0 flex flex-col items-center justify-center bg-yellow-50">
+                                <span class="text-sm font-medium text-yellow-600">Styling Failed</span>
+                                <p class="text-[10px] text-yellow-500 px-4 text-center mt-2">The grid is ready, but styling failed.</p>
+                            </div>
+                            {% elif puzzle.status == 'rejected' %}
+                            <div class="absolute inset-0 flex flex-col items-center justify-center bg-red-50">
+                                <span class="text-sm font-medium text-red-600">Content Prohibited</span>
+                                <p class="text-[10px] text-red-400 px-4 text-center mt-2">This theme was flagged as inappropriate.</p>
+                            </div>
+                            {% else %}
+                            <div class="absolute inset-0 flex flex-col items-center justify-center bg-red-50">
+                                <span class="text-sm font-medium text-red-600">Generation Failed</span>
+                                <p class="text-[10px] text-red-400 px-4 text-center mt-2">{{ puzzle.error_message }}</p>
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Info -->
+                        <div class="p-5">
+                            <div class="flex justify-between items-start mb-2">
+                                <h3 class="font-bold text-lg text-gray-900 truncate pr-2">{{ puzzle.theme }}</h3>
+                                <span class="text-[10px] px-2 py-1 bg-gray-100 text-gray-500 rounded-full font-mono">{{ puzzle.age_range }}</span>
+                            </div>
+                            <p class="text-xs text-gray-400 mb-4">{{ puzzle.style.capitalize() }} style • {{ puzzle.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                            
+                            {% if puzzle.status == 'completed' or puzzle.status == 'failed_styling' %}
+                            <div class="flex flex-wrap gap-2">
+                                <a href="/download-all/{{ puzzle.hash_id }}" onclick="event.stopPropagation()" class="flex-1 bg-gray-900 hover:bg-black text-white text-center text-xs font-bold py-2 rounded-lg transition-colors">Download (.zip)</a>
+                                <a href="/download/{{ puzzle.hash_id }}/pdf" onclick="event.stopPropagation()" class="flex-1 bg-red-700 hover:bg-red-800 text-white text-center text-xs font-bold py-2 rounded-lg transition-colors">Download (.pdf)</a>
+                                <div class="px-3 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                                    <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Progress Modal -->
+    <div id="progress-modal" class="fixed inset-0 bg-black/60 backdrop-blur-md hidden z-[60] flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl w-full max-w-lg p-8 shadow-2xl">
+            <div class="text-center mb-8">
+                <div id="progress-loading-icon" class="loading-spinner mx-auto mb-6"></div>
+                <h2 id="progress-title" class="text-2xl font-black mb-2 text-gray-900">Generating Your Puzzle</h2>
+                <div id="progress-timer-container" class="flex justify-center items-center space-x-2 text-gray-400 mb-6">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <span id="progress-timer" class="text-sm font-mono font-bold">00:00</span>
+                </div>
+                <p id="progress-msg" class="text-gray-500 font-medium mb-6">Pipeline starting...</p>
+            </div>
+            
+            <!-- Checklist -->
+            <div id="progress-checklist" class="space-y-4 mb-8 bg-gray-50 rounded-2xl p-6 border border-gray-100">
+                <div id="step-words" class="check-item">
+                    <div class="check-icon" id="icon-words">
+                        <svg class="w-full h-full text-gray-300" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l5-5z" clip-rule="evenodd"></path></svg>
+                    </div>
+                    <span>Building word list</span>
+                </div>
+                <div id="step-template" class="check-item">
+                    <div class="check-icon" id="icon-template">
+                        <svg class="w-full h-full text-gray-300" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l5-5z" clip-rule="evenodd"></path></svg>
+                    </div>
+                    <span>Creating plain template</span>
+                </div>
+                <div id="step-answer" class="check-item">
+                    <div class="check-icon" id="icon-answer">
+                        <svg class="w-full h-full text-gray-300" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l5-5z" clip-rule="evenodd"></path></svg>
+                    </div>
+                    <span>Creating answer sheet</span>
+                </div>
+                <div id="step-style" class="check-item">
+                    <div class="check-icon" id="icon-style">
+                        <svg class="w-full h-full text-gray-300" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l5-5z" clip-rule="evenodd"></path></svg>
+                    </div>
+                    <span>Stylizing with Gemini</span>
+                </div>
+                <div id="step-ocr" class="check-item">
+                    <div class="check-icon" id="icon-ocr">
+                        <svg class="w-full h-full text-gray-300" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l5-5z" clip-rule="evenodd"></path></svg>
+                    </div>
+                    <span>Verifying letter integrity</span>
+                </div>
+            </div>
+
+            <!-- Review Area -->
+            <div id="review-area" class="hidden mb-8 space-y-4">
+                <div class="text-left">
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Edit Generated Words:</label>
+                    <textarea id="review-words-input" rows="4" 
+                              class="w-full px-4 py-2 border-2 border-orange-200 rounded-xl text-sm focus:ring-2 focus:ring-orange-500 outline-none"></textarea>
+                    <p class="text-[10px] text-gray-400 mt-1 italic">Comma-separated, no spaces allowed.</p>
+                </div>
+                <button onclick="confirmReview()" class="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl shadow-lg transition-all">Confirm & Build Grid</button>
+            </div>
+
+            <div id="progress-words-container" class="hidden text-left bg-blue-50 rounded-xl p-4 mb-6 border border-blue-100 max-h-32 overflow-y-auto">
+                <h4 class="text-[10px] font-bold uppercase tracking-wider text-blue-400 mb-2 sticky top-0 bg-blue-50 pt-1">Words Selected by AI:</h4>
+                <p id="progress-words" class="text-xs text-blue-700 leading-relaxed font-medium break-words"></p>
+            </div>
+
+            <div id="progress-error" class="hidden text-red-600 bg-red-50 rounded-xl p-4 mb-6 text-sm border border-red-100 text-left"></div>
+            
+            <div class="space-y-3">
+                <button id="progress-retry" onclick="retryStyling()" class="hidden w-full py-3 bg-blue-600 hover:bg-blue-700 rounded-xl font-bold text-white transition-colors">Retry Styling</button>
+                <button id="progress-close" onclick="closeProgress()" class="hidden w-full py-3 bg-gray-100 hover:bg-gray-200 rounded-xl font-bold text-gray-600 transition-colors">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Detail Modal -->
+    <div id="detail-modal" class="fixed inset-0 bg-black/60 backdrop-blur-md hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl w-full max-w-6xl max-h-[90vh] overflow-y-auto shadow-2xl relative">
+            <button onclick="closeDetail()" class="absolute top-6 right-6 text-gray-400 hover:text-gray-900 transition-colors z-10">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+            
+            <div class="p-8">
+                <div class="flex items-center justify-between mb-8">
+                    <h2 id="modal-title" class="text-3xl font-black text-gray-900">Puzzle Preview</h2>
+                    <button onclick="sharePuzzle()" class="flex items-center gap-2 px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-xl font-bold text-sm transition-colors">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"></path></svg>
+                        <span id="share-btn-text">Share</span>
+                    </button>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <!-- Styled -->
+                    <div id="modal-styled-container" class="space-y-4">
+                        <h4 class="font-bold text-sm uppercase tracking-widest text-gray-400">Styled Puzzle</h4>
+                        <div class="rounded-xl overflow-hidden border border-gray-100 shadow-sm cursor-zoom-in" onclick="zoomImage(this.querySelector('img').src)">
+                            <img id="modal-styled-img" src="" class="w-full h-auto">
+                        </div>
+                        <a id="modal-styled-dl" href="#" class="block w-full text-center py-2 bg-blue-50 text-blue-600 rounded-lg font-bold text-xs hover:bg-blue-100 transition-colors">Download Styled</a>
+                    </div>
+                    
+                    <!-- Original -->
+                    <div class="space-y-4">
+                        <h4 class="font-bold text-sm uppercase tracking-widest text-gray-400">Clean Grid</h4>
+                        <div class="rounded-xl overflow-hidden border border-gray-100 shadow-sm cursor-zoom-in" onclick="zoomImage(this.querySelector('img').src)">
+                            <img id="modal-original-img" src="" class="w-full h-auto">
+                        </div>
+                        <a id="modal-original-dl" href="#" class="block w-full text-center py-2 bg-gray-50 text-gray-600 rounded-lg font-bold text-xs hover:bg-gray-100 transition-colors">Download Plain</a>
+                    </div>
+
+                    <!-- Answer -->
+                    <div class="space-y-4">
+                        <h4 class="font-bold text-sm uppercase tracking-widest text-gray-400">Answer Key</h4>
+                        <div class="rounded-xl overflow-hidden border border-gray-100 shadow-sm cursor-zoom-in" onclick="zoomImage(this.querySelector('img').src)">
+                            <img id="modal-answer-img" src="" class="w-full h-auto">
+                        </div>
+                        <a id="modal-answer-dl" href="#" class="block w-full text-center py-2 bg-green-50 text-green-600 rounded-lg font-bold text-xs hover:bg-green-100 transition-colors">Download Answer Sheet</a>
+                    </div>
+                </div>
+
+                <!-- OCR Warning (shown when letter verification fails) -->
+                <div id="modal-ocr-warning" class="hidden mt-8 bg-red-50 border border-red-200 rounded-xl p-4">
+                    <div class="flex items-start gap-3">
+                        <svg class="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"></path></svg>
+                        <div>
+                            <h4 class="font-bold text-sm text-red-800 mb-1">Letter Verification Failed</h4>
+                            <p id="modal-ocr-warning-text" class="text-xs text-red-700"></p>
+                            <p class="text-xs text-red-600 mt-2">Red boxes highlight letters that may have been altered or covered. Please visually verify these areas before using this puzzle.</p>
+                        </div>
+                    </div>
+                    <div id="modal-style-check-container" class="mt-3">
+                        <img id="modal-style-check-img" class="w-full rounded-lg cursor-pointer border border-red-200" alt="Style check with flagged letters" onclick="zoomImage(this.src)" />
+                    </div>
+                </div>
+
+                <!-- Suggested Prompt (shown for non-styled puzzles) -->
+                <div id="modal-prompt-container" class="hidden mt-8">
+                    <h4 class="font-bold text-sm uppercase tracking-widest text-gray-400 mb-3">Suggested Styling Prompt</h4>
+                    <p class="text-xs text-gray-500 mb-2">Use this prompt with your preferred image generator to style the plain grid yourself.</p>
+                    <div class="relative">
+                        <pre id="modal-prompt-text" class="bg-gray-50 border border-gray-200 rounded-xl p-4 text-sm text-gray-700 whitespace-pre-wrap break-words max-h-40 overflow-y-auto"></pre>
+                        <button onclick="copyPrompt()" class="absolute top-3 right-3 px-3 py-1 bg-white border border-gray-200 rounded-lg text-xs font-bold text-gray-500 hover:text-gray-900 hover:border-gray-400 transition-colors">Copy</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Zoom Modal -->
+    <div id="zoom-modal" class="fixed inset-0 bg-black/90 hidden z-[100] flex items-center justify-center p-4 cursor-zoom-out" onclick="closeZoom()">
+        <img id="zoom-img" src="" class="max-w-full max-h-full rounded shadow-2xl">
+    </div>
+
+    <script>
+        const AGE_PRESETS = {
+            "5-6": ["h_fwd"],
+            "6-8": ["h_fwd", "v_fwd"],
+            "8-10": ["h_fwd", "v_fwd", "d_fwd_r", "d_fwd_l"],
+            "11-12": ["h_fwd", "h_rev", "v_fwd", "v_rev", "d_fwd_r", "d_fwd_l"],
+            "12+": ["h_fwd", "h_rev", "v_fwd", "v_rev", "d_fwd_r", "d_fwd_l", "d_rev_r", "d_rev_l", "overlap"]
+        };
+
+        let currentHashId = null;
+        let currentDetailHash = null;
+        let timerInterval;
+        let startTime;
+
+        function startTimer() {
+            startTime = Date.now();
+            const timerEl = document.getElementById('progress-timer');
+            timerEl.innerText = "00:00";
+            timerInterval = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
+                const secs = (elapsed % 60).toString().padStart(2, '0');
+                timerEl.innerText = `${mins}:${secs}`;
+            }, 1000);
+        }
+
+        function stopTimer() { clearInterval(timerInterval); }
+
+        function toggleCustomWords() {
+            const container = document.getElementById('custom-words-container');
+            const toggle = document.getElementById('custom-words-toggle');
+            container.classList.toggle('hidden', !toggle.checked);
+        }
+
+        function updateAgePresets() {
+            const age = document.getElementById('age-select').value;
+            const presets = AGE_PRESETS[age] || [];
+            document.querySelectorAll('input[name^="h_"], input[name^="v_"], input[name^="d_"], input[name="overlap"]').forEach(chk => {
+                chk.checked = false;
+            });
+            presets.forEach(id => {
+                const el = document.getElementById('chk-' + id);
+                if (el) el.checked = true;
+            });
+        }
+
+        async function startGeneration() {
+            const form = document.getElementById('gen-form');
+            if (!form.checkValidity()) { form.reportValidity(); return; }
+
+            const formData = new FormData(form);
+            const submitBtn = document.getElementById('submit-btn');
+            const progressModal = document.getElementById('progress-modal');
+            const applyStyle = document.getElementById('apply-style-chk').checked;
+
+            // Reset checklist
+            document.querySelectorAll('.check-item').forEach(el => {
+                el.classList.remove('active', 'completed');
+                const svg = el.querySelector('svg');
+                svg.style.color = '#d1d5db'; // text-gray-300
+            });
+            document.getElementById('step-style').style.display = applyStyle ? 'flex' : 'none';
+            document.getElementById('step-ocr').style.display = applyStyle ? 'flex' : 'none';
+            document.getElementById('progress-loading-icon').classList.remove('hidden');
+            document.getElementById('progress-checklist').classList.remove('hidden');
+            document.getElementById('review-area').classList.add('hidden');
+
+            // UI State
+            submitBtn.disabled = true;
+            submitBtn.classList.add('opacity-50');
+            progressModal.classList.remove('hidden');
+            document.getElementById('progress-error').classList.add('hidden');
+            document.getElementById('progress-retry').classList.add('hidden');
+            document.getElementById('progress-close').classList.add('hidden');
+            document.getElementById('progress-words-container').classList.add('hidden');
+            
+            startTimer();
+
+            try {
+                const response = await fetch('/generate', { method: 'POST', body: formData });
+                const data = await response.json();
+                if (data.status === 'success') {
+                    currentHashId = data.hash_id;
+                    pollStatus(data.hash_id);
+                } else {
+                    throw new Error(data.detail || "Failed to start generation");
+                }
+            } catch (err) { showProgressError(err.message); }
+        }
+
+        async function confirmReview() {
+            const words = document.getElementById('review-words-input').value;
+            if (!words.trim()) return;
+
+            document.getElementById('review-area').classList.add('hidden');
+            document.getElementById('progress-msg').innerText = 'Generating puzzle...';
+            document.getElementById('progress-loading-icon').classList.remove('hidden');
+            document.getElementById('progress-checklist').classList.remove('hidden');
+            
+            try {
+                const response = await fetch(`/review/${currentHashId}`, { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ words: words })
+                });
+                const data = await response.json();
+                if (data.status === 'success') {
+                    pollStatus(currentHashId);
+                } else {
+                    throw new Error(data.detail || "Failed to confirm words");
+                }
+            } catch (err) { showProgressError(err.message); }
+        }
+
+        async function retryStyling() {
+            if (!currentHashId) return;
+            document.getElementById('progress-error').classList.add('hidden');
+            document.getElementById('progress-retry').classList.add('hidden');
+            document.getElementById('progress-close').classList.add('hidden');
+            document.getElementById('progress-loading-icon').classList.remove('hidden');
+            setStep('style', 'active');
+            try {
+                const response = await fetch(`/retry/${currentHashId}`, { method: 'POST' });
+                const data = await response.json();
+                if (data.status === 'success') { pollStatus(currentHashId); }
+                else { throw new Error(data.detail || "Failed to retry styling"); }
+            } catch (err) { showProgressError(err.message); }
+        }
+
+        function setStep(id, status) {
+            const el = document.getElementById('step-' + id);
+            const svg = el.querySelector('svg');
+            if (status === 'active') {
+                el.classList.add('active');
+                el.classList.remove('completed');
+                svg.style.color = '#3b82f6'; // blue
+            } else if (status === 'completed') {
+                el.classList.add('completed');
+                el.classList.remove('active');
+                svg.style.color = '#10b981'; // green
+            }
+        }
+
+        async function pollStatus(hashId) {
+            let lastMessage = null;
+            let polling = true;
+
+            async function poll() {
+                while (polling) {
+                    try {
+                        const url = lastMessage !== null
+                            ? `/status/${hashId}?last_message=${encodeURIComponent(lastMessage)}`
+                            : `/status/${hashId}`;
+                        const response = await fetch(url);
+                        const data = await response.json();
+
+                        if (data.status === 'deleted') {
+                            polling = false;
+                            showProgressError("Generation timed out or failed. Please try again.");
+                            return;
+                        }
+
+                        const msg = data.message || "";
+                        lastMessage = data.message;
+
+                        // Additive checklist logic
+                        if (msg.includes("STEP_WORDS")) { setStep('words', 'active'); }
+                        if (msg.includes("STEP_GRID") || msg.includes("STEP_TEMPLATE") || msg.includes("STEP_ANSWER") || msg.includes("STEP_STYLE") || msg.includes("STEP_COMPLETE")) {
+                            setStep('words', 'completed');
+                        }
+                        if (msg.includes("STEP_TEMPLATE")) { setStep('template', 'active'); }
+                        if (msg.includes("STEP_ANSWER") || msg.includes("STEP_STYLE") || msg.includes("STEP_COMPLETE")) {
+                            setStep('template', 'completed');
+                        }
+                        if (msg.includes("STEP_ANSWER")) { setStep('answer', 'active'); }
+                        if (msg.includes("STEP_STYLE") || msg.includes("STEP_COMPLETE")) {
+                            setStep('answer', 'completed');
+                        }
+                        if (msg.includes("STEP_STYLE")) {
+                            if (msg.includes("Verifying")) {
+                                setStep('style', 'completed');
+                                setStep('ocr', 'active');
+                            } else {
+                                setStep('style', 'active');
+                            }
+                        }
+                        if (msg.includes("STEP_COMPLETE")) {
+                            setStep('style', 'completed');
+                            setStep('ocr', 'completed');
+                        }
+
+                        if (data.words) {
+                            document.getElementById('progress-words-container').classList.remove('hidden');
+                            document.getElementById('progress-words').innerText = data.words;
+                        }
+
+                        if (data.status === 'awaiting_review') {
+                            polling = false;
+                            document.getElementById('progress-loading-icon').classList.add('hidden');
+                            document.getElementById('progress-checklist').classList.add('hidden');
+                            document.getElementById('review-area').classList.remove('hidden');
+                            document.getElementById('review-words-input').value = data.words;
+                            document.getElementById('progress-msg').innerText = "Please review your words";
+                        } else if (data.status === 'completed') {
+                            polling = false;
+                            setStep('words', 'completed'); setStep('template', 'completed'); setStep('answer', 'completed'); setStep('ocr', 'completed');
+                            const hasWarning = data.message && data.message.includes('STEP_COMPLETE_WITH_WARNING');
+                            if (hasWarning) {
+                                setStep('style', 'completed');
+                                document.getElementById('progress-msg').innerText = "Done — letter verification warning detected. Check the detail view.";
+                            } else {
+                                setStep('style', 'completed');
+                            }
+                            setTimeout(() => { closeProgress(); window.location.href = `/?detail=${hashId}`; }, hasWarning ? 2500 : 1000);
+                        } else if (data.status === 'failed_styling') {
+                            polling = false;
+                            setStep('style', 'active');
+                            showStylingRetry(data.message);
+                        } else if (data.status === 'rejected') {
+                            polling = false;
+                            showProgressError(data.error || "This theme contains prohibited content and cannot be used.");
+                        } else if (data.status === 'failed') {
+                            polling = false;
+                            showProgressError(data.error || "Generation failed.");
+                        }
+                    } catch (err) {
+                        console.error(err);
+                        await new Promise(r => setTimeout(r, 2000)); // retry after error
+                    }
+                }
+            }
+            poll();
+        }
+
+        function showStylingRetry(msg) {
+            stopTimer();
+            document.getElementById('progress-error').innerText = msg;
+            document.getElementById('progress-error').classList.remove('hidden');
+            document.getElementById('progress-retry').classList.remove('hidden');
+            document.getElementById('progress-close').classList.remove('hidden');
+            document.getElementById('progress-loading-icon').classList.add('hidden');
+        }
+
+        function showProgressError(msg) {
+            stopTimer();
+            document.getElementById('progress-error').innerText = msg;
+            document.getElementById('progress-error').classList.remove('hidden');
+            document.getElementById('progress-close').classList.remove('hidden');
+            document.getElementById('progress-loading-icon').classList.add('hidden');
+        }
+
+        async function openDetail(hashId) {
+            const modal = document.getElementById('detail-modal');
+            const styledImg = document.getElementById('modal-styled-img');
+            const promptContainer = document.getElementById('modal-prompt-container');
+
+            // Set image sources
+            styledImg.src = `/storage/${hashId}_styled.png?t=${Date.now()}`;
+            document.getElementById('modal-original-img').src = `/storage/${hashId}_original.png?t=${Date.now()}`;
+            document.getElementById('modal-answer-img').src = `/storage/${hashId}_answer.png?t=${Date.now()}`;
+            document.getElementById('modal-styled-dl').href = `/download/${hashId}/styled`;
+            document.getElementById('modal-original-dl').href = `/download/${hashId}/original`;
+            document.getElementById('modal-answer-dl').href = `/download/${hashId}/answer`;
+            styledImg.onerror = () => { document.getElementById('modal-styled-container').style.display = 'none'; };
+            styledImg.onload = () => { document.getElementById('modal-styled-container').style.display = 'block'; };
+
+            // Update URL so the user can copy/share it
+            const url = new URL(window.location);
+            url.searchParams.set('detail', hashId);
+            window.history.pushState({detail: hashId}, '', url);
+            currentDetailHash = hashId;
+
+            // Fetch detail to check for suggested prompt, OCR warning, and title
+            promptContainer.classList.add('hidden');
+            document.getElementById('modal-ocr-warning').classList.add('hidden');
+            document.getElementById('modal-title').textContent = 'Puzzle Preview';
+            try {
+                const res = await fetch(`/detail/${hashId}`);
+                if (res.ok) {
+                    const detail = await res.json();
+                    if (detail.theme) {
+                        document.getElementById('modal-title').textContent = `Puzzle Preview: ${detail.theme}`;
+                    }
+                    if (detail.suggested_prompt && !detail.has_styled) {
+                        document.getElementById('modal-prompt-text').textContent = detail.suggested_prompt;
+                        promptContainer.classList.remove('hidden');
+                    }
+                    if (detail.ocr_warning) {
+                        document.getElementById('modal-ocr-warning-text').textContent = detail.ocr_warning;
+                        document.getElementById('modal-ocr-warning').classList.remove('hidden');
+                        const checkImg = document.getElementById('modal-style-check-img');
+                        checkImg.src = `/download/${hashId}/style_check?t=${Date.now()}`;
+                    }
+                }
+            } catch (e) { /* non-critical */ }
+
+            modal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function sharePuzzle() {
+            if (!currentDetailHash) return;
+            const url = new URL(window.location);
+            url.searchParams.set('detail', currentDetailHash);
+            navigator.clipboard.writeText(url.toString()).then(() => {
+                const btn = document.getElementById('share-btn-text');
+                btn.textContent = 'Copied!';
+                setTimeout(() => { btn.textContent = 'Share'; }, 2000);
+            });
+        }
+
+        function copyPrompt() {
+            const text = document.getElementById('modal-prompt-text').textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                const btn = document.querySelector('#modal-prompt-container button');
+                btn.textContent = 'Copied!';
+                setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+            });
+        }
+
+        function zoomImage(src) {
+            document.getElementById('zoom-img').src = src;
+            document.getElementById('zoom-modal').classList.remove('hidden');
+        }
+
+        function closeZoom() { document.getElementById('zoom-modal').classList.add('hidden'); }
+        function closeDetail() {
+            document.getElementById('detail-modal').classList.add('hidden');
+            document.body.style.overflow = 'auto';
+            currentDetailHash = null;
+            const url = new URL(window.location);
+            url.searchParams.delete('detail');
+            window.history.pushState({}, '', url);
+        }
+        function closeProgress() { stopTimer(); document.getElementById('progress-modal').classList.add('hidden'); document.getElementById('submit-btn').disabled = false; document.getElementById('submit-btn').classList.remove('opacity-50'); }
+
+        updateAgePresets();
+
+        // Restore apply_style toggle from session (defaults to checked on first visit)
+        (function() {
+            const stored = sessionStorage.getItem('apply_style');
+            const chk = document.getElementById('apply-style-chk');
+            chk.checked = stored === null ? true : stored === 'true';
+            const advLabel = document.getElementById('advanced-model-label');
+            advLabel.classList.toggle('hidden', !chk.checked);
+            advLabel.classList.toggle('flex', chk.checked);
+        })();
+
+        // Auto-open detail modal if URL has ?detail= param
+        (function() {
+            const params = new URLSearchParams(window.location.search);
+            const detailId = params.get('detail');
+            if (detailId) {
+                openDetail(detailId);
+            }
+        })();
+
+        // Handle browser back/forward button
+        window.addEventListener('popstate', function(e) {
+            const params = new URLSearchParams(window.location.search);
+            const detailId = params.get('detail');
+            if (detailId) {
+                openDetail(detailId);
+            } else if (currentDetailHash) {
+                document.getElementById('detail-modal').classList.add('hidden');
+                document.body.style.overflow = 'auto';
+                currentDetailHash = null;
+            }
+        });
+    </script>
+</body>
+</html>

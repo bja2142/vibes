@@ -1,0 +1,44 @@
+Metadata-Version: 2.1
+Name: browser-puppet
+Version: 0.1.0
+Summary: Agentic browser-control MCP server for testing and evidence capture.
+Home-page: UNKNOWN
+License: UNKNOWN
+Platform: UNKNOWN
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Provides-Extra: dev
+
+# Browser Puppet
+
+Browser Puppet is a Python MCP server that exposes stateful Playwright-driven browser automation for testing, UI validation, and evidence capture.
+
+## Features
+
+- SSE and stdio MCP transports
+- Stateful browser contexts and page tracking
+- Desktop/mobile emulation support
+- Inline target resolution for interaction tools
+- Post-action observation bundles and named checkpoints
+- DOM, accessibility, console, network, storage, and screenshot tooling
+- Batch actions via `fill_form` and `run_steps`
+- Artifact capture for screenshots, traces, downloads, storage state, and reports
+
+## Run
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .[dev]
+playwright install chromium firefox
+browser-puppet --transport sse --host 0.0.0.0 --port 8000
+```
+
+## Docker
+
+```bash
+docker build -t browser-puppet .
+docker run --rm -p 8000:8000 browser-puppet
+```
+
+

@@ -1,0 +1,21 @@
+services:
+  browser-puppet:
+    build:
+      context: .
+    image: browser-puppet
+    environment:
+      BROWSER_PUPPET_PORT: ${BROWSER_PUPPET_PORT:-8000}
+      BROWSER_PUPPET_ARTIFACT_DIR: /data/artifacts
+      BROWSER_PUPPET_LOG_LEVEL: ${BROWSER_PUPPET_LOG_LEVEL:-INFO}
+    ports:
+      - "${BROWSER_PUPPET_PORT:-8000}:${BROWSER_PUPPET_PORT:-8000}"
+    volumes:
+      - ${BROWSER_PUPPET_ARTIFACTS_HOST_DIR:-./artifacts}:/data/artifacts
+    command:
+      - /bin/sh
+      - -c
+      - |
+        Xvfb :99 -screen 0 1280x800x24 -nolisten tcp &
+        sleep 1
+        export DISPLAY=:99
+        exec browser-puppet --log-level DEBUG --transport ${BROWSER_PUPPET_TRANSPORT:-both} --host 0.0.0.0 --port ${BROWSER_PUPPET_PORT:-8000}

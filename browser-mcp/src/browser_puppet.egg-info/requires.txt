@@ -1,0 +1,6 @@
+mcp>=1.10.0
+playwright>=1.52.0
+
+[dev]
+pytest-asyncio>=0.23.0
+pytest>=8.2.0
