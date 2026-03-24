@@ -1,0 +1,26 @@
+services:
+  reversing-mcp:
+    container_name: reversing-mcp-compose
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: reversing-mcp:compose
+    init: true
+    restart: unless-stopped
+    user: "${REVERSING_MCP_UID:-1000}:${REVERSING_MCP_GID:-1000}"
+    environment:
+      HOME: /workspace/.home
+      REVERSING_MCP_LOG_LEVEL: ${REVERSING_MCP_LOG_LEVEL:-INFO}
+      REVERSING_MCP_WORKSPACE_ROOT: /workspace
+    command:
+      - reversing-mcp
+      - --transport
+      - both
+      - --host
+      - 0.0.0.0
+      - --port
+      - ${REVERSING_MCP_PORT:-6767}
+    ports:
+      - "${REVERSING_MCP_PORT:-6767}:${REVERSING_MCP_PORT:-6767}"
+    volumes:
+      - ./runtime/workspace:/workspace
