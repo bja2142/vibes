@@ -1,0 +1,6 @@
+Flask==3.0.3
+CairoSVG==2.7.1
+pytest==8.3.5
+google-genai
+pydantic>=2,<3
+pypdf==5.4.0

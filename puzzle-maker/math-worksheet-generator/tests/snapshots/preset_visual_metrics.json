@@ -1,0 +1,282 @@
+{
+  "apple": {
+    "background_label": "Soft Gray",
+    "bbox": {
+      "bottom": 22,
+      "left": 6,
+      "right": 21,
+      "top": 4
+    },
+    "grid_size": 28,
+    "non_background_count": 172,
+    "used_counts": {
+      "Apple Red": 30,
+      "Blush Red": 41,
+      "Cherry Red": 32,
+      "Crimson": 3,
+      "Leaf Green": 31,
+      "Rose Red": 31,
+      "Stem Brown": 4
+    }
+  },
+  "blue_tang": {
+    "background_label": "Soft White",
+    "bbox": {
+      "bottom": 27,
+      "left": 3,
+      "right": 32,
+      "top": 5
+    },
+    "grid_size": 36,
+    "non_background_count": 493,
+    "used_counts": {
+      "Aqua Blue": 67,
+      "Bright Yellow": 51,
+      "Deep Blue": 84,
+      "Navy": 92,
+      "Outline Navy": 98,
+      "Tail Yellow": 38,
+      "Tang Blue": 63
+    }
+  },
+  "butterfly": {
+    "background_label": "Soft Sky",
+    "bbox": {
+      "bottom": 24,
+      "left": 4,
+      "right": 30,
+      "top": 0
+    },
+    "grid_size": 34,
+    "non_background_count": 374,
+    "used_counts": {
+      "Aqua": 42,
+      "Butter Yellow": 50,
+      "Charcoal": 88,
+      "Coral": 52,
+      "Indigo": 51,
+      "Sky Blue": 48,
+      "Violet": 43
+    }
+  },
+  "cat": {
+    "background_label": "Soft White",
+    "bbox": {
+      "bottom": 29,
+      "left": 2,
+      "right": 38,
+      "top": 2
+    },
+    "grid_size": 40,
+    "non_background_count": 688,
+    "used_counts": {
+      "Charcoal": 41,
+      "Cream": 23,
+      "Dark Brown": 228,
+      "Deep Orange": 140,
+      "Golden Orange": 124,
+      "Nose Pink": 3,
+      "Orange": 129
+    }
+  },
+  "christmas_tree": {
+    "background_label": "Snow White",
+    "bbox": {
+      "bottom": 29,
+      "left": 9,
+      "right": 24,
+      "top": 3
+    },
+    "grid_size": 34,
+    "non_background_count": 222,
+    "used_counts": {
+      "Cedar Green": 35,
+      "Evergreen": 34,
+      "Forest Green": 35,
+      "Mistletoe": 34,
+      "Pine Green": 28,
+      "Spruce": 28,
+      "Trunk Brown": 28
+    }
+  },
+  "clown_fish": {
+    "background_label": "Ocean Mist",
+    "bbox": {
+      "bottom": 27,
+      "left": 2,
+      "right": 32,
+      "top": 5
+    },
+    "grid_size": 36,
+    "non_background_count": 496,
+    "used_counts": {
+      "Bright Orange": 55,
+      "Charcoal": 179,
+      "Clown Orange": 54,
+      "Coral Orange": 81,
+      "Deep Orange": 83,
+      "Shell White": 26,
+      "Stripe White": 18
+    }
+  },
+  "flower": {
+    "background_label": "Sky Blue",
+    "bbox": {
+      "bottom": 24,
+      "left": 6,
+      "right": 21,
+      "top": 6
+    },
+    "grid_size": 28,
+    "non_background_count": 126,
+    "used_counts": {
+      "Center Yellow": 8,
+      "Cloud White": 19,
+      "Cream White": 18,
+      "Petal White": 17,
+      "Soft Ivory": 16,
+      "Stem Green": 28,
+      "Warm White": 20
+    }
+  },
+  "heart": {
+    "background_label": "Soft Gray",
+    "bbox": {
+      "bottom": 23,
+      "left": 0,
+      "right": 27,
+      "top": 3
+    },
+    "grid_size": 28,
+    "non_background_count": 432,
+    "used_counts": {
+      "Coral": 61,
+      "Leaf Green": 68,
+      "Ocean Teal": 61,
+      "Plum": 61,
+      "Sky Blue": 60,
+      "Stone Gray": 60,
+      "Sun Yellow": 61
+    }
+  },
+  "moon": {
+    "background_label": "Midnight Black",
+    "bbox": {
+      "bottom": 21,
+      "left": 9,
+      "right": 21,
+      "top": 6
+    },
+    "grid_size": 28,
+    "non_background_count": 88,
+    "used_counts": {
+      "Ash Gray": 6,
+      "Cool Gray": 7,
+      "Lunar Gray": 6,
+      "Moon White": 48,
+      "Pale Gray": 7,
+      "Silver Gray": 7,
+      "Slate Gray": 7
+    }
+  },
+  "rocket": {
+    "background_label": "Sky Blue",
+    "bbox": {
+      "bottom": 26,
+      "left": 5,
+      "right": 19,
+      "top": 3
+    },
+    "grid_size": 28,
+    "non_background_count": 168,
+    "used_counts": {
+      "Cloud White": 16,
+      "Flame Gold": 9,
+      "Flame Orange": 9,
+      "Gunmetal": 22,
+      "Jet Black": 68,
+      "Silver": 20,
+      "Steel": 24
+    }
+  },
+  "smile": {
+    "background_label": "Soft Cream",
+    "bbox": {
+      "bottom": 23,
+      "left": 3,
+      "right": 25,
+      "top": 3
+    },
+    "grid_size": 28,
+    "non_background_count": 399,
+    "used_counts": {
+      "Bright Yellow": 64,
+      "Butter": 43,
+      "Charcoal": 94,
+      "Golden Yellow": 42,
+      "Honey": 59,
+      "Sun Yellow": 44,
+      "Warm Gold": 53
+    }
+  },
+  "star": {
+    "background_label": "Midnight Black",
+    "bbox": {
+      "bottom": 24,
+      "left": 3,
+      "right": 24,
+      "top": 4
+    },
+    "grid_size": 28,
+    "non_background_count": 208,
+    "used_counts": {
+      "Amber Gold": 23,
+      "Moon White": 21,
+      "Pale Gold": 21,
+      "Soft Gold": 23,
+      "Star Gold": 78,
+      "Starlight": 21,
+      "Warm Gold": 21
+    }
+  },
+  "sun": {
+    "background_label": "Sky Blue",
+    "bbox": {
+      "bottom": 24,
+      "left": 3,
+      "right": 24,
+      "top": 3
+    },
+    "grid_size": 28,
+    "non_background_count": 280,
+    "used_counts": {
+      "Amber": 31,
+      "Deep Gold": 31,
+      "Golden Yellow": 28,
+      "Light Gold": 31,
+      "Pale Blue": 31,
+      "Sun Yellow": 100,
+      "Warm Yellow": 28
+    }
+  },
+  "tree": {
+    "background_label": "Soft White",
+    "bbox": {
+      "bottom": 25,
+      "left": 6,
+      "right": 21,
+      "top": 5
+    },
+    "grid_size": 28,
+    "non_background_count": 180,
+    "used_counts": {
+      "Cedar Green": 22,
+      "Forest Green": 23,
+      "Leaf Green": 23,
+      "Moss Green": 22,
+      "Olive Green": 23,
+      "Pale Green": 23,
+      "Trunk Brown": 44
+    }
+  }
+}

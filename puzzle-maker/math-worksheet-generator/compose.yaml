@@ -1,0 +1,37 @@
+services:
+  worksheet-poc:
+    build:
+      context: .
+    command: python scripts/serve_site.py --port 9595
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash-lite}
+      APP_LOG_VERBOSITY: ${APP_LOG_VERBOSITY:-normal}
+      APP_DB_PATH: /var/lib/math-worksheet-generator/db/app.sqlite3
+      APP_ARTIFACT_ROOT: /var/lib/math-worksheet-generator/artifacts
+    ports:
+      - "9595:9595"
+    volumes:
+      - .:/app
+      - worksheet_app_db:/var/lib/math-worksheet-generator/db
+      - worksheet_app_artifacts:/var/lib/math-worksheet-generator/artifacts
+  worksheet-test:
+    build:
+      context: .
+    command: python scripts/run_full_checks.py
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash-lite}
+      APP_LOG_VERBOSITY: ${APP_LOG_VERBOSITY:-normal}
+      APP_DB_PATH: /var/lib/math-worksheet-generator/db/app.sqlite3
+      APP_ARTIFACT_ROOT: /var/lib/math-worksheet-generator/artifacts
+    profiles:
+      - tools
+    volumes:
+      - .:/app
+      - worksheet_app_db:/var/lib/math-worksheet-generator/db
+      - worksheet_app_artifacts:/var/lib/math-worksheet-generator/artifacts
+
+volumes:
+  worksheet_app_db:
+  worksheet_app_artifacts:

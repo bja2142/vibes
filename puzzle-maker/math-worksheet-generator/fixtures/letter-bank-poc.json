@@ -1,0 +1,279 @@
+{
+  "spec": {
+    "worksheet_id": "letter-bank-poc",
+    "learner_band": "upper_elementary",
+    "skill_profile": "mixed_operations",
+    "selected_skills": [],
+    "difficulty_range": {
+      "minimum": 1,
+      "maximum": 2
+    },
+    "problem_count": 9,
+    "reveal_mode": "letter_bank",
+    "theme": "classroom humor",
+    "seed": 101,
+    "layout": {
+      "page_width": 1080,
+      "page_height": 1500,
+      "problem_columns": 3,
+      "show_slot_labels": true,
+      "max_color_options": 32,
+      "color_palette": {},
+      "color_grid_size": 0,
+      "color_grid_cells": [],
+      "color_grid_source": null,
+      "color_grid_name": null
+    }
+  },
+  "reward_content": {
+    "prompt_text": "What subject gives your brain a workout and your pencil a purpose?",
+    "solution_phrase": "MATH RULES",
+    "theme": "classroom humor",
+    "source": "direct_input",
+    "approval_state": "approved",
+    "style": "question",
+    "language": "en",
+    "reading_level_assessment": {
+      "learner_band": "upper_elementary",
+      "passed": true,
+      "word_count": 16,
+      "sentence_count": 1,
+      "long_word_count": 2,
+      "flagged_terms": [],
+      "notes": [
+        "Short classroom-safe prompt approved for upper elementary readers."
+      ]
+    },
+    "review_notes": []
+  },
+  "problems": [
+    {
+      "problem_id": "P1",
+      "prompt": "9 + 4 = ?",
+      "family": "addition",
+      "difficulty": 1,
+      "answer_format": "integer",
+      "learner_band": "upper_elementary",
+      "metadata": {}
+    },
+    {
+      "problem_id": "P2",
+      "prompt": "6 + 2 = ?",
+      "family": "addition",
+      "difficulty": 1,
+      "answer_format": "integer",
+      "learner_band": "upper_elementary",
+      "metadata": {}
+    },
+    {
+      "problem_id": "P3",
+      "prompt": "14 - 9 = ?",
+      "family": "subtraction",
+      "difficulty": 1,
+      "answer_format": "integer",
+      "learner_band": "upper_elementary",
+      "metadata": {}
+    },
+    {
+      "problem_id": "P4",
+      "prompt": "3 x 4 = ?",
+      "family": "multiplication",
+      "difficulty": 1,
+      "answer_format": "integer",
+      "learner_band": "upper_elementary",
+      "metadata": {}
+    },
+    {
+      "problem_id": "P5",
+      "prompt": "18 - 11 = ?",
+      "family": "subtraction",
+      "difficulty": 1,
+      "answer_format": "integer",
+      "learner_band": "upper_elementary",
+      "metadata": {}
+    },
+    {
+      "problem_id": "P6",
+      "prompt": "20 - 11 = ?",
+      "family": "subtraction",
+      "difficulty": 1,
+      "answer_format": "integer",
+      "learner_band": "upper_elementary",
+      "metadata": {}
+    },
+    {
+      "problem_id": "P7",
+      "prompt": "15 - 4 = ?",
+      "family": "subtraction",
+      "difficulty": 1,
+      "answer_format": "integer",
+      "learner_band": "upper_elementary",
+      "metadata": {}
+    },
+    {
+      "problem_id": "P8",
+      "prompt": "5 x 2 = ?",
+      "family": "multiplication",
+      "difficulty": 1,
+      "answer_format": "integer",
+      "learner_band": "upper_elementary",
+      "metadata": {}
+    },
+    {
+      "problem_id": "P9",
+      "prompt": "16 - 10 = ?",
+      "family": "subtraction",
+      "difficulty": 1,
+      "answer_format": "integer",
+      "learner_band": "upper_elementary",
+      "metadata": {}
+    }
+  ],
+  "solved_problems": [
+    {
+      "problem_id": "P1",
+      "canonical_answer": "13",
+      "normalized_answer": "13",
+      "verified": true
+    },
+    {
+      "problem_id": "P2",
+      "canonical_answer": "8",
+      "normalized_answer": "8",
+      "verified": true
+    },
+    {
+      "problem_id": "P3",
+      "canonical_answer": "5",
+      "normalized_answer": "5",
+      "verified": true
+    },
+    {
+      "problem_id": "P4",
+      "canonical_answer": "12",
+      "normalized_answer": "12",
+      "verified": true
+    },
+    {
+      "problem_id": "P5",
+      "canonical_answer": "7",
+      "normalized_answer": "7",
+      "verified": true
+    },
+    {
+      "problem_id": "P6",
+      "canonical_answer": "9",
+      "normalized_answer": "9",
+      "verified": true
+    },
+    {
+      "problem_id": "P7",
+      "canonical_answer": "11",
+      "normalized_answer": "11",
+      "verified": true
+    },
+    {
+      "problem_id": "P8",
+      "canonical_answer": "10",
+      "normalized_answer": "10",
+      "verified": true
+    },
+    {
+      "problem_id": "P9",
+      "canonical_answer": "6",
+      "normalized_answer": "6",
+      "verified": true
+    }
+  ],
+  "letter_assignments": [
+    {
+      "problem_id": "P1",
+      "answer_value": "13",
+      "reveal_token": "M",
+      "answer_slot_index": 0,
+      "is_distractor": false
+    },
+    {
+      "problem_id": "P2",
+      "answer_value": "8",
+      "reveal_token": "A",
+      "answer_slot_index": 1,
+      "is_distractor": false
+    },
+    {
+      "problem_id": "P3",
+      "answer_value": "5",
+      "reveal_token": "T",
+      "answer_slot_index": 2,
+      "is_distractor": false
+    },
+    {
+      "problem_id": "P4",
+      "answer_value": "12",
+      "reveal_token": "H",
+      "answer_slot_index": 3,
+      "is_distractor": false
+    },
+    {
+      "problem_id": "P5",
+      "answer_value": "7",
+      "reveal_token": "R",
+      "answer_slot_index": 4,
+      "is_distractor": false
+    },
+    {
+      "problem_id": "P6",
+      "answer_value": "9",
+      "reveal_token": "U",
+      "answer_slot_index": 5,
+      "is_distractor": false
+    },
+    {
+      "problem_id": "P7",
+      "answer_value": "11",
+      "reveal_token": "L",
+      "answer_slot_index": 6,
+      "is_distractor": false
+    },
+    {
+      "problem_id": "P8",
+      "answer_value": "10",
+      "reveal_token": "E",
+      "answer_slot_index": 7,
+      "is_distractor": false
+    },
+    {
+      "problem_id": "P9",
+      "answer_value": "6",
+      "reveal_token": "S",
+      "answer_slot_index": 8,
+      "is_distractor": false
+    }
+  ],
+  "rendered_outputs": [],
+  "reward_content_candidates": [
+    {
+      "prompt_text": "What subject gives your brain a workout and your pencil a purpose?",
+      "solution_phrase": "MATH RULES",
+      "theme": "classroom humor",
+      "source": "reviewed_fixture",
+      "approval_state": "approved",
+      "style": "question",
+      "language": "en",
+      "reading_level_assessment": {
+        "learner_band": "upper_elementary",
+        "passed": true,
+        "word_count": 16,
+        "sentence_count": 1,
+        "long_word_count": 2,
+        "flagged_terms": [],
+        "notes": [
+          "Short classroom-safe prompt approved for upper elementary readers."
+        ]
+      },
+      "review_notes": [
+        "Fixture candidate reviewed and approved."
+      ]
+    }
+  ]
+}

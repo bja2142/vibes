@@ -1,0 +1,56 @@
+{
+  "letter-bank-poc": {
+    "preview": {
+      "page_width": 1080,
+      "page_height": 1500,
+      "problem_count": 9,
+      "slot_count": 9,
+      "content_bottom": 1006,
+      "content_fits_page": true
+    },
+    "solution": {
+      "page_width": 1080,
+      "page_height": 1500,
+      "problem_count": 9,
+      "slot_count": 9,
+      "content_bottom": 1006,
+      "content_fits_page": true
+    }
+  },
+  "color-by-number-poc": {
+    "preview": {
+      "page_width": 1080,
+      "page_height": 1500,
+      "problem_count": 4,
+      "slot_count": 0,
+      "content_bottom": 1066,
+      "content_fits_page": true
+    },
+    "solution": {
+      "page_width": 1080,
+      "page_height": 1500,
+      "problem_count": 4,
+      "slot_count": 0,
+      "content_bottom": 1066,
+      "content_fits_page": true
+    }
+  },
+  "pre-algebra-poc": {
+    "preview": {
+      "page_width": 1080,
+      "page_height": 1600,
+      "problem_count": 6,
+      "slot_count": 6,
+      "content_bottom": 742,
+      "content_fits_page": true
+    },
+    "solution": {
+      "page_width": 1080,
+      "page_height": 1600,
+      "problem_count": 6,
+      "slot_count": 6,
+      "content_bottom": 742,
+      "content_fits_page": true
+    }
+  }
+}

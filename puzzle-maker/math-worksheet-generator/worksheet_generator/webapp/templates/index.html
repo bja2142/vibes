@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Worksheet Studio</title>
+    <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="control-pane">
+            <div class="pane-header">
+                <p class="eyebrow">Worksheet Studio</p>
+                <h1>Build A Worksheet</h1>
+                <p class="lede">
+                    Generate printable math worksheets, review the clue, and keep every run in a searchable studio.
+                </p>
+            </div>
+
+            <form id="worksheet-config-form" class="workflow-form">
+                <section class="panel-section" id="gemini-status-panel">
+                    <div class="section-heading">
+                        <h2>Content Setup</h2>
+                        <span class="status-pill" id="gemini-status-pill">Checking environment…</span>
+                    </div>
+                    <p class="muted" id="gemini-status-note"></p>
+                    <div class="field-grid" id="gemini-fields">
+                        <label class="field">
+                            <span>Theme / Topic</span>
+                            <textarea id="theme" rows="3" placeholder="Space, skateboards, fractions, mystery, animals"></textarea>
+                        </label>
+                        <label class="field">
+                            <span>Reward Style</span>
+                            <select id="reward-style"></select>
+                        </label>
+                        <label class="field">
+                            <span>Language</span>
+                            <select id="reward-language"></select>
+                        </label>
+                    </div>
+                </section>
+
+                <section class="panel-section">
+                    <div class="section-heading">
+                        <h2>Worksheet Parameters</h2>
+                        <span class="status-pill neutral">Guided</span>
+                    </div>
+                    <div class="field-grid">
+                        <label class="field">
+                            <span>Learner Band Preset</span>
+                            <select id="learner-band"></select>
+                        </label>
+                        <p class="muted" id="learner-band-preset-note"></p>
+                        <label class="field">
+                            <span>Reveal Mode</span>
+                            <select id="reveal-mode"></select>
+                        </label>
+                    </div>
+                    <div class="field-grid">
+                        <div class="field">
+                            <span>Included Challenge Types</span>
+                            <div id="skill-selection-list" class="skill-selection-list"></div>
+                        </div>
+                        <label class="field">
+                            <span>Seed</span>
+                            <input id="seed" type="number" min="1" placeholder="Optional deterministic seed">
+                        </label>
+                    </div>
+                    <div class="field-grid" id="letter-bank-options">
+                        <label class="field">
+                            <span>Lookup Decoys (%)</span>
+                            <input id="decoy-percentage" type="number" min="0" max="300" value="100">
+                        </label>
+                    </div>
+                    <div id="color-by-number-options">
+                        <p class="muted" id="color-picture-note">
+                            Color-by-number worksheets use square preset or Gemini-generated pixel pictures sized from
+                            16x16 at low difficulty up to 22x22 at difficulty 2. This mode is limited to beginner
+                            difficulty so the answers fit cleanly inside the grid.
+                        </p>
+                        <div class="field-grid">
+                            <label class="field">
+                                <span>Picture Source</span>
+                                <select id="color-picture-source"></select>
+                            </label>
+                            <label class="field">
+                                <span>Preset Picture</span>
+                                <select id="color-picture-preset"></select>
+                            </label>
+                        </div>
+                    </div>
+                    <div id="image-styling-options">
+                        <p class="muted" id="image-styling-note">
+                            Save optional Gemini image-styling settings with each worksheet run.
+                        </p>
+                        <div class="field-grid">
+                            <label class="field checkbox-field">
+                                <span>Apply Gemini Image Styling</span>
+                                <input id="apply-image-styling" type="checkbox">
+                            </label>
+                            <label class="field">
+                                <span>Image Style</span>
+                                <select id="image-style-name"></select>
+                            </label>
+                            <label class="field">
+                                <span>Color Treatment</span>
+                                <select id="image-color-mode"></select>
+                            </label>
+                            <label class="field checkbox-field">
+                                <span>Ink Saver</span>
+                                <input id="image-ink-saver" type="checkbox">
+                            </label>
+                        </div>
+                        <label class="field">
+                            <span>Additional Style Guidance</span>
+                            <textarea
+                                id="image-additional-guidance"
+                                rows="3"
+                                maxlength="500"
+                                placeholder="Optional extra art direction for Gemini styling"
+                            ></textarea>
+                        </label>
+                        <p class="muted guidance-status-line">
+                            <span id="image-additional-guidance-count">0 / 500 characters</span>
+                        </p>
+                    </div>
+                    <p class="muted" id="form-note">
+                        Configure the worksheet once here. Review, approval, generation, and optional styling happen inside the workflow popup.
+                    </p>
+                    <p class="status-line" id="form-validation-message" hidden></p>
+                    <div class="button-row">
+                        <button type="submit" id="start-workflow-button">Start Workflow</button>
+                    </div>
+                </section>
+
+            </form>
+
+            <section class="panel-section compact" id="runtime-panel">
+                <div class="section-heading">
+                    <h2>Runtime</h2>
+                </div>
+                <ul class="runtime-list" id="runtime-metadata"></ul>
+            </section>
+
+            <section class="panel-section compact" id="maintenance-panel">
+                <div class="section-heading">
+                    <h2>Maintenance</h2>
+                </div>
+                <p class="muted" id="maintenance-note">
+                    Debug-only cleanup and storage controls for local operations.
+                </p>
+                <ul class="runtime-list" id="maintenance-metadata"></ul>
+                <div class="button-row">
+                    <button type="button" id="maintenance-refresh-button" class="secondary-button">Refresh</button>
+                    <button type="button" id="maintenance-prune-button" class="secondary-button">Prune Orphans</button>
+                    <button type="button" id="maintenance-vacuum-button" class="secondary-button">Vacuum DB</button>
+                </div>
+            </section>
+        </aside>
+
+        <main class="gallery-pane">
+            <div class="gallery-header">
+                <div>
+                    <p class="eyebrow">Worksheet Library</p>
+                    <h2>Recent Runs</h2>
+                </div>
+                <div class="gallery-stats" id="gallery-stats"></div>
+            </div>
+
+            <div class="gallery-search shell-card">
+                <div class="search-row">
+                    <input type="search" id="gallery-search-input" placeholder="Search by title, theme, prompt, or solution" disabled>
+                    <button type="button" id="gallery-search-button" disabled>Search</button>
+                    <button type="button" id="gallery-clear-button" disabled>Clear</button>
+                </div>
+                <div class="filter-row">
+                    <label class="field">
+                        <span>Filter Band</span>
+                        <select id="gallery-filter-band"></select>
+                    </label>
+                    <label class="field">
+                        <span>Filter Mode</span>
+                        <select id="gallery-filter-mode"></select>
+                    </label>
+                    <label class="field">
+                        <span>Skill Profile</span>
+                        <select id="gallery-filter-skill-profile"></select>
+                    </label>
+                    <label class="field">
+                        <span>Styling Status</span>
+                        <select id="gallery-filter-styling-status"></select>
+                    </label>
+                    <label class="field">
+                        <span>Picture Preset</span>
+                        <select id="gallery-filter-picture-preset"></select>
+                    </label>
+                    <label class="field">
+                        <span>Sort</span>
+                        <select id="gallery-sort-order"></select>
+                    </label>
+                    <label class="field">
+                        <span>Difficulty Minimum</span>
+                        <input type="number" id="gallery-filter-difficulty-minimum" min="1" max="5" placeholder="Any">
+                    </label>
+                    <label class="field">
+                        <span>Difficulty Maximum</span>
+                        <input type="number" id="gallery-filter-difficulty-maximum" min="1" max="5" placeholder="Any">
+                    </label>
+                </div>
+            </div>
+
+            <section class="gallery-grid" id="gallery-grid"></section>
+            <div class="button-row gallery-pagination">
+                <button type="button" id="gallery-load-more-button" class="secondary-button" hidden>Load More</button>
+            </div>
+
+            <template id="empty-gallery-template">
+                <article class="empty-state shell-card">
+                    <h3>No Worksheets Yet</h3>
+                    <p id="empty-gallery-message">
+                        Generate and approve a reward draft, then create a worksheet. Saved worksheet runs will appear
+                        here with previews, parameters, and downloadable artifacts.
+                    </p>
+                </article>
+            </template>
+        </main>
+    </div>
+
+    <dialog id="workflow-modal" class="job-modal">
+        <div class="modal-header">
+            <div>
+                <h2 id="workflow-title">Worksheet Workflow</h2>
+                <p class="muted" id="workflow-subtitle">Preparing workflow…</p>
+            </div>
+            <div class="workflow-heading-meta">
+                <span class="status-pill neutral" id="workflow-state-pill">Idle</span>
+                <span class="timer-pill" id="workflow-timer">00:00</span>
+            </div>
+        </div>
+        <div class="modal-body">
+            <div id="workflow-inline-staging" hidden>
+                <section class="modal-section workflow-inline-section" id="workflow-locked-summary-section" hidden>
+                    <div class="section-heading">
+                        <h3 id="workflow-locked-summary-title">Locked Worksheet Content</h3>
+                        <span class="status-pill neutral" id="workflow-locked-summary-meta">Locked</span>
+                    </div>
+                    <p class="muted" id="workflow-locked-summary-note">
+                        This content is now fixed for the active worksheet workflow.
+                    </p>
+                    <div class="summary-stack">
+                        <div class="summary-card">
+                            <span class="summary-label">Riddle / Prompt</span>
+                            <p id="workflow-locked-prompt" class="modal-quote"></p>
+                        </div>
+                        <div class="summary-card">
+                            <span class="summary-label">Solution Text</span>
+                            <p id="workflow-locked-solution" class="summary-solution"></p>
+                        </div>
+                    </div>
+                </section>
+                <section class="modal-section workflow-inline-section" id="workflow-review-section" hidden>
+                    <div class="section-heading">
+                        <h3>Review The Riddle</h3>
+                        <span class="status-pill muted" id="workflow-draft-meta">Draft pending</span>
+                    </div>
+                    <div class="field-grid">
+                        <label class="field">
+                            <span>Riddle / Prompt</span>
+                            <textarea id="workflow-review-prompt" rows="5" placeholder="Generated or manual prompt"></textarea>
+                        </label>
+                        <label class="field">
+                            <span>Solution Text</span>
+                            <input id="workflow-review-solution" type="text" placeholder="Solution phrase">
+                        </label>
+                        <label class="field">
+                            <span id="workflow-derived-problem-count-label">Solution Letter Count</span>
+                            <input id="workflow-derived-problem-count" type="text" readonly value="0">
+                        </label>
+                        <label class="field">
+                            <span id="workflow-derived-total-question-count-label">Derived Question Count</span>
+                            <input id="workflow-derived-total-question-count" type="text" readonly value="0">
+                        </label>
+                    </div>
+                    <p class="muted" id="workflow-review-note">
+                        Review the riddle, make any edits you want, then render the worksheet.
+                    </p>
+                    <div class="button-row" id="workflow-review-actions">
+                        <div class="button-row workflow-review-button-group">
+                            <button type="button" id="workflow-regenerate-button" class="secondary-button">Regenerate Riddle</button>
+                            <button type="button" id="workflow-regenerate-from-solution-button" class="secondary-button workflow-ghost-button" aria-hidden="true" disabled>Write Clue For Edited Solution</button>
+                        </div>
+                        <button type="button" id="workflow-proceed-button">Render Worksheet</button>
+                    </div>
+                </section>
+                <section class="modal-section workflow-inline-section" id="workflow-run-review-section" hidden>
+                    <div class="section-heading">
+                        <h3>Plain Worksheet Review</h3>
+                        <span class="status-pill neutral" id="workflow-run-meta">Run pending</span>
+                    </div>
+                    <p class="muted" id="workflow-run-note">
+                        Review the plain worksheet below. Then either continue into Gemini image styling or keep the plain worksheet only.
+                    </p>
+                    <label class="field" id="workflow-image-guidance-field">
+                        <span>Additional Style Guidance</span>
+                        <textarea
+                            id="workflow-image-additional-guidance"
+                            rows="3"
+                            maxlength="500"
+                            placeholder="Optional extra art direction for Gemini styling"
+                        ></textarea>
+                    </label>
+                    <p class="muted guidance-status-line">
+                        <span id="workflow-image-guidance-preview">No additional guidance will be sent to Gemini.</span>
+                        <span id="workflow-image-guidance-count">0 / 500 characters</span>
+                    </p>
+                    <div id="workflow-run-images" class="modal-image-grid"></div>
+                    <div class="button-row" id="workflow-styling-actions">
+                        <button type="button" id="workflow-confirm-styling-button">Confirm Styling</button>
+                        <button type="button" id="workflow-keep-plain-button" class="secondary-button">Keep Plain Worksheet</button>
+                    </div>
+                </section>
+                <section class="modal-section workflow-inline-section" id="workflow-styled-response-section" hidden>
+                    <div class="section-heading">
+                        <h3>Gemini Response</h3>
+                        <span class="status-pill neutral" id="workflow-styled-response-meta">Waiting</span>
+                    </div>
+                    <p class="muted" id="workflow-styled-response-note">
+                        Styled worksheet responses will appear here after Gemini finishes and verification completes.
+                    </p>
+                    <div id="workflow-styled-images" class="modal-image-grid"></div>
+                </section>
+            </div>
+            <section class="modal-section">
+                <h3>Workflow Progress</h3>
+                <p class="status-line" id="workflow-status-message" data-tone="neutral">Waiting to begin.</p>
+                <ol id="workflow-phase-list" class="workflow-phase-list"></ol>
+            </section>
+            <section class="modal-section" id="workflow-log-section">
+                <h3>Activity Log</h3>
+                <ul id="workflow-log" class="runtime-list workflow-log"></ul>
+            </section>
+            <details class="modal-section workflow-config-details" id="workflow-config-section">
+                <summary>Configuration Snapshot</summary>
+                <ul id="workflow-parameters" class="runtime-list"></ul>
+            </details>
+        </div>
+        <div class="modal-footer">
+            <button type="button" id="workflow-close-button" class="secondary-button">Close</button>
+        </div>
+    </dialog>
+
+    <dialog id="run-modal" class="run-modal">
+        <div class="modal-header">
+            <div>
+                <h2 id="modal-title">Worksheet Run</h2>
+                <p class="muted" id="modal-subtitle"></p>
+            </div>
+            <button type="button" id="modal-close-button" class="modal-close">Close</button>
+        </div>
+        <div class="modal-body">
+            <section class="modal-section">
+                <div class="section-heading">
+                    <h3>Run State</h3>
+                    <span class="status-pill neutral" id="modal-run-state-pill">Run Pending</span>
+                </div>
+                <p class="muted" id="modal-run-state-note">The detail view is the canonical place to inspect this run.</p>
+            </section>
+            <section class="modal-section">
+                <h3>Prompt</h3>
+                <p id="modal-prompt" class="modal-quote"></p>
+            </section>
+            <section class="modal-section">
+                <h3>Solution</h3>
+                <p id="modal-solution"></p>
+            </section>
+            <section class="modal-section" id="modal-summary-section">
+                <h3>Summary</h3>
+                <ul id="modal-summary" class="runtime-list"></ul>
+            </section>
+            <section class="modal-section" id="modal-meta-section">
+                <h3>Parameters</h3>
+                <ul id="modal-meta" class="runtime-list"></ul>
+            </section>
+            <section class="modal-section">
+                <h3>Downloads</h3>
+                <div id="modal-downloads" class="download-grid"></div>
+            </section>
+            <section class="modal-section" id="modal-styling-decision-section" hidden>
+                <div class="section-heading">
+                    <h3>Image Styling Review</h3>
+                    <span class="status-pill neutral" id="modal-styling-status-pill">Awaiting Confirmation</span>
+                </div>
+                <p class="muted" id="modal-styling-note">
+                    Review the plain worksheet first. Then confirm whether Gemini should generate a styled version, or keep the plain worksheet only.
+                </p>
+                <label class="field" id="modal-image-guidance-field">
+                    <span>Additional Style Guidance</span>
+                    <textarea
+                        id="modal-image-additional-guidance"
+                        rows="3"
+                        maxlength="500"
+                        placeholder="Optional extra art direction for Gemini styling"
+                    ></textarea>
+                </label>
+                <p class="muted guidance-status-line">
+                    <span id="modal-image-guidance-preview">No additional guidance will be sent to Gemini.</span>
+                    <span id="modal-image-guidance-count">0 / 500 characters</span>
+                </p>
+                <div class="button-row">
+                    <button type="button" id="modal-confirm-styling-button">Confirm Styling</button>
+                    <button type="button" id="modal-cancel-styling-button" class="secondary-button">Keep Plain Worksheet</button>
+                    <button type="button" id="modal-retry-styling-button">Retry Styling</button>
+                    <button type="button" id="modal-retry-generation-button" class="secondary-button">Regenerate Worksheet</button>
+                </div>
+            </section>
+            <section class="modal-section">
+                <h3>Images</h3>
+                <div id="modal-images" class="modal-image-grid"></div>
+            </section>
+        </div>
+    </dialog>
+
+    <dialog id="image-preview-modal" class="image-preview-modal">
+        <div class="modal-header">
+            <div>
+                <h2 id="image-preview-title">Preview</h2>
+                <p class="muted">Full-resolution PNG preview</p>
+            </div>
+            <button type="button" id="image-preview-close-button" class="modal-close">Close</button>
+        </div>
+        <div class="image-preview-body">
+            <img id="image-preview-display" src="" alt="">
+        </div>
+    </dialog>
+
+    <script src="/static/app.js" defer></script>
+</body>
+</html>

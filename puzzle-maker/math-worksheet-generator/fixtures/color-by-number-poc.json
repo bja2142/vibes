@@ -1,0 +1,463 @@
+{
+  "spec": {
+    "worksheet_id": "color-by-number-poc",
+    "learner_band": "early_arithmetic",
+    "skill_profile": "subtraction_and_addition",
+    "selected_skills": [],
+    "difficulty_range": {
+      "minimum": 1,
+      "maximum": 1
+    },
+    "problem_count": 4,
+    "reveal_mode": "color_by_number",
+    "theme": "patterns",
+    "seed": 202,
+    "layout": {
+      "page_width": 1080,
+      "page_height": 1500,
+      "problem_columns": 3,
+      "show_slot_labels": true,
+      "max_color_options": 32,
+      "color_palette": {
+        "Sun Yellow": "#f4c542",
+        "Leaf Green": "#6ba36f",
+        "Sky Blue": "#67a6d8",
+        "Coral": "#dd7c6b"
+      },
+      "color_grid_size": 16,
+      "color_grid_cells": [
+        [
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow"
+        ],
+        [
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow"
+        ],
+        [
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Leaf Green",
+          "Leaf Green",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Leaf Green",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow"
+        ],
+        [
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Leaf Green",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow"
+        ],
+        [
+          "Sun Yellow",
+          "Sun Yellow",
+          "Leaf Green",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Leaf Green",
+          "Sky Blue",
+          "Sky Blue",
+          "Leaf Green",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sun Yellow",
+          "Sun Yellow"
+        ],
+        [
+          "Sun Yellow",
+          "Sun Yellow",
+          "Leaf Green",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Leaf Green",
+          "Coral",
+          "Coral",
+          "Leaf Green",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Sun Yellow",
+          "Sun Yellow"
+        ],
+        [
+          "Sun Yellow",
+          "Sun Yellow",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Leaf Green",
+          "Sun Yellow"
+        ],
+        [
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Leaf Green",
+          "Sun Yellow"
+        ],
+        [
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Leaf Green",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Leaf Green",
+          "Sky Blue",
+          "Sky Blue",
+          "Leaf Green",
+          "Sun Yellow"
+        ],
+        [
+          "Sun Yellow",
+          "Sun Yellow",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Leaf Green",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Leaf Green",
+          "Sun Yellow"
+        ],
+        [
+          "Sun Yellow",
+          "Sun Yellow",
+          "Leaf Green",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Leaf Green",
+          "Leaf Green",
+          "Leaf Green",
+          "Leaf Green",
+          "Coral",
+          "Coral",
+          "Coral",
+          "Leaf Green",
+          "Sun Yellow"
+        ],
+        [
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Leaf Green",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Leaf Green",
+          "Sun Yellow",
+          "Sun Yellow"
+        ],
+        [
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Leaf Green",
+          "Leaf Green",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Sky Blue",
+          "Leaf Green",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow"
+        ],
+        [
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Leaf Green",
+          "Leaf Green",
+          "Leaf Green",
+          "Leaf Green",
+          "Leaf Green",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow"
+        ],
+        [
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow"
+        ],
+        [
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow",
+          "Sun Yellow"
+        ]
+      ],
+      "color_grid_source": "preset",
+      "color_grid_name": "smile"
+    }
+  },
+  "reward_content": {
+    "prompt_text": "What cheerful face shape should appear when you color the picture?",
+    "solution_phrase": "SMILE",
+    "theme": "patterns",
+    "source": "direct_input",
+    "approval_state": "approved",
+    "style": "activity",
+    "language": "en",
+    "reading_level_assessment": {
+      "learner_band": "early_arithmetic",
+      "passed": true,
+      "word_count": 12,
+      "sentence_count": 1,
+      "long_word_count": 1,
+      "flagged_terms": [],
+      "notes": [
+        "Short instruction prompt approved for early arithmetic readers."
+      ]
+    },
+    "review_notes": []
+  },
+  "problems": [
+    {
+      "problem_id": "C1",
+      "prompt": "8 - 4 = ?",
+      "family": "subtraction",
+      "difficulty": 1,
+      "answer_format": "integer",
+      "learner_band": "early_arithmetic",
+      "metadata": {}
+    },
+    {
+      "problem_id": "C2",
+      "prompt": "10 - 3 = ?",
+      "family": "subtraction",
+      "difficulty": 1,
+      "answer_format": "integer",
+      "learner_band": "early_arithmetic",
+      "metadata": {}
+    },
+    {
+      "problem_id": "C3",
+      "prompt": "6 + 3 = ?",
+      "family": "addition",
+      "difficulty": 1,
+      "answer_format": "integer",
+      "learner_band": "early_arithmetic",
+      "metadata": {}
+    },
+    {
+      "problem_id": "C4",
+      "prompt": "3 x 4 = ?",
+      "family": "multiplication",
+      "difficulty": 1,
+      "answer_format": "integer",
+      "learner_band": "early_arithmetic",
+      "metadata": {}
+    }
+  ],
+  "solved_problems": [
+    {
+      "problem_id": "C1",
+      "canonical_answer": "4",
+      "normalized_answer": "4",
+      "verified": true
+    },
+    {
+      "problem_id": "C2",
+      "canonical_answer": "7",
+      "normalized_answer": "7",
+      "verified": true
+    },
+    {
+      "problem_id": "C3",
+      "canonical_answer": "9",
+      "normalized_answer": "9",
+      "verified": true
+    },
+    {
+      "problem_id": "C4",
+      "canonical_answer": "12",
+      "normalized_answer": "12",
+      "verified": true
+    }
+  ],
+  "letter_assignments": [
+    {
+      "problem_id": "C1",
+      "answer_value": "4",
+      "reveal_token": "Sun Yellow",
+      "answer_slot_index": null,
+      "is_distractor": false
+    },
+    {
+      "problem_id": "C2",
+      "answer_value": "7",
+      "reveal_token": "Leaf Green",
+      "answer_slot_index": null,
+      "is_distractor": false
+    },
+    {
+      "problem_id": "C3",
+      "answer_value": "9",
+      "reveal_token": "Sky Blue",
+      "answer_slot_index": null,
+      "is_distractor": false
+    },
+    {
+      "problem_id": "C4",
+      "answer_value": "12",
+      "reveal_token": "Coral",
+      "answer_slot_index": null,
+      "is_distractor": false
+    }
+  ],
+  "rendered_outputs": [],
+  "reward_content_candidates": [
+    {
+      "prompt_text": "What cheerful face shape should appear when you color the picture?",
+      "solution_phrase": "SMILE",
+      "theme": "patterns",
+      "source": "reviewed_fixture",
+      "approval_state": "approved",
+      "style": "activity",
+      "language": "en",
+      "reading_level_assessment": {
+        "learner_band": "early_arithmetic",
+        "passed": true,
+        "word_count": 12,
+        "sentence_count": 1,
+        "long_word_count": 1,
+        "flagged_terms": [],
+        "notes": [
+          "Short instruction prompt approved for early arithmetic readers."
+        ]
+      },
+      "review_notes": [
+        "Fixture candidate reviewed and approved."
+      ]
+    }
+  ]
+}
