@@ -89,7 +89,7 @@ class WorkspaceSecurity:
             raise StructuredToolError(
                 "missing_prerequisite",
                 "path_missing",
-                f"{purpose} path '{resolved}' does not exist.",
+                f"{purpose} path '{resolved}' does not exist. Workspace root is '{self.workspace_root}'; provide a path relative to or within this directory.",
                 details={"path": str(resolved), "workspace_root": str(self.workspace_root)},
             )
         if not resolved.is_file():

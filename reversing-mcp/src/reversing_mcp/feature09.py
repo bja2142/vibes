@@ -59,7 +59,8 @@ def normalize_brief_options(
 ) -> dict[str, Any]:
     normalized = verbosity.strip().lower()
     if normalized not in VERBOSITY_PROFILES:
-        raise ValueError("verbosity must be one of: brief, normal, deep.")
+        valid = ", ".join(sorted(VERBOSITY_PROFILES))
+        raise ValueError(f"verbosity {normalized!r} is not recognized; must be one of: {valid}.")
     profile = json_clone(VERBOSITY_PROFILES[normalized])
     effective = normalized
     if token_budget_hint is not None:

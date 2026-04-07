@@ -1,109 +1,255 @@
-# Reversing MCP
+# Reversing MCP + PWN MCP
 
-`reversing-mcp` is a static binary analysis MCP server for workspace-scoped reverse engineering. It provides persistent sessions, artifact management, triage, disassembly, decompilation, semantic recovery, signatures and extraction workflows, analyst notes, exports, and batch operations through a structured MCP tool surface.
+A two-server MCP system for end-to-end binary analysis: static reverse engineering and dynamic exploitation.
 
-## What It Provides
+| Server | Port | Purpose | Tool Count |
+|---|---|---|---|
+| `reversing-mcp` | 6767 | Static analysis: disassembly, decompilation, semantic recovery, signatures, patching | ~82 |
+| `pwn-mcp` | 6768 | Dynamic analysis: GDB, Frida, AFL++, rr, pwntools, Z3, protocol fuzzing | 79 |
 
-Current implemented scope:
+Both servers share a workspace volume so static analysis results feed directly into dynamic workflows.
 
-- Persistent analysis sessions rooted in the shared workspace.
-- Stable artifact, function, and string identifiers with analysis-generation invalidation.
-- File triage for ELF, PE, Mach-O, ZIP, TAR, and raw hinted blobs.
-- Structured strings, address translation, child-artifact listing, and linkage/debug metadata.
-- Async analysis with function enumeration, disassembly, decompilation, xrefs, and search.
-- Semantic recovery including call graphs, CFGs, variables, stack frames, constants, types, runtime metadata, slices, system calls, and triage scoring.
-- Signature and extraction workflows including YARA-style scanning, compiler/toolchain fingerprints, crypto constants, packer heuristics, entropy, string deobfuscation, extraction, carving, and relationship tracking.
-- Analyst workflow features including notes, bookmarks, named regions, snapshots, curated exports, and batch artifact queries.
-- Feature 07 workflows including byte and assembly patching, code-cave discovery, artifact-local naming and type overrides, type import, command/report export, dependency views, cross-artifact correlation, and structural diffing.
-- Feature 08 operational polish including stdio and streamable HTTP transport, HTTP auth and quota controls, single-agent session leasing for HTTP, enriched analysis synopses, and a requirements traceability matrix.
-- Feature 09 composite brief workflows including one-shot intake, compact analysis summaries, ranked hunting shortlists, function traces, patch plans, relationship briefs, and response-budget controls.
-
-## Tool Surface
-
-The MCP currently exposes these tool groups:
-
-- Discovery and runtime policy
-- Session and artifact lifecycle
-- Triage and file-intake metadata
-- Analysis, disassembly, and decompilation
-- Semantic recovery and analyst workflow
-- Signatures, extraction, and obfuscation handling
-- Annotations, snapshots, jobs, and exports
-- Patching, overrides, reports, and multi-artifact interoperability
-- Composite token-efficient workflow briefs
-
-Use `describe_tools` or `get_capabilities` from the MCP for machine-readable discovery.
-
-## Run
-
-```bash
-reversing-mcp --transport stdio
-```
-
-## Docker Compose
+## Quick Start
 
 ```bash
 cp .env.example .env
 docker compose up -d --build
 ```
 
-The compose deployment exposes the MCP on port `6767` by default and can be overridden with `REVERSING_MCP_PORT` in `.env`.
+### MCP Client Configuration
 
-If your host user is not `1000:1000`, set `REVERSING_MCP_UID` and `REVERSING_MCP_GID` in `.env` to match your local UID/GID so the mounted workspace stays writable.
+Add both servers to your MCP client (e.g. Claude Code `~/.claude.json`):
 
-Endpoints:
+```json
+{
+  "mcpServers": {
+    "reversing-mcp": {
+      "type": "sse",
+      "url": "http://127.0.0.1:6767/sse"
+    },
+    "pwn-mcp": {
+      "type": "sse",
+      "url": "http://127.0.0.1:6768/sse"
+    }
+  }
+}
+```
 
-- Streamable HTTP MCP: `http://127.0.0.1:${REVERSING_MCP_PORT:-6767}/mcp`
-- SSE MCP: `http://127.0.0.1:${REVERSING_MCP_PORT:-6767}/sse`
+Both servers support SSE and streamable HTTP protocols at the `/sse` endpoint.
 
-Important environment variables:
+### Place Binaries in the Workspace
 
-- `REVERSING_MCP_WORKSPACE_ROOT`: shared workspace root used for persisted session state. Defaults to `/workspace`.
-- `REVERSING_MCP_LOG_LEVEL`: optional log level for the server process.
-- `REVERSING_MCP_MAX_INPUT_SIZE_BYTES`: maximum accepted input size.
-- `REVERSING_MCP_MAX_ARTIFACTS_PER_SESSION`: session artifact-count limit.
-- `REVERSING_MCP_PARSER_TIMEOUT_SECONDS`: isolated parser timeout.
-- `REVERSING_MCP_PARSER_MEMORY_MB`: isolated parser memory limit.
-- `REVERSING_MCP_PARSER_CPU_SECONDS`: isolated parser CPU budget.
-- `REVERSING_MCP_RECURSION_DEPTH_LIMIT`: recursive extraction depth limit.
-- `REVERSING_MCP_STRING_COUNT_LIMIT`: string extraction cap.
-- `REVERSING_MCP_CARVED_BYTE_BUDGET`: total carved-byte budget for extraction workflows.
-- `REVERSING_MCP_HTTP_REQUIRE_AUTH`: require bearer auth on the streamable HTTP transport. Defaults to `false`.
-- `REVERSING_MCP_HTTP_TOKENS`: comma-separated `tenant=token` pairs for HTTP auth. Tokens are only enforced when `REVERSING_MCP_HTTP_REQUIRE_AUTH=true`.
-- `REVERSING_MCP_HTTP_AGENT_HEADER`: request header used to identify the current HTTP agent. Defaults to `x-reversing-agent-id`.
-- `REVERSING_MCP_HTTP_REQUESTS_PER_MINUTE_PER_AGENT`: per-agent HTTP request quota.
-- `REVERSING_MCP_HTTP_MAX_SESSIONS_PER_TENANT`: per-tenant HTTP session quota.
-- `REVERSING_MCP_HTTP_MAX_ACTIVE_JOBS_PER_TENANT`: per-tenant active-job quota.
+```bash
+cp /path/to/target.elf runtime/workspace/
+```
+
+Both servers can access files under `runtime/workspace/`.
+
+## Architecture
+
+```
+                    MCP Client (Claude Code, etc.)
+                     /                        \
+               SSE/HTTP                    SSE/HTTP
+                 /                              \
+    +-----------------------+     +-----------------------+
+    |    reversing-mcp      |     |       pwn-mcp         |
+    |    (static only)      |     |   (dynamic execution) |
+    |                       |     |                       |
+    | angr, Ghidra, YARA,   |     | GDB, Frida, AFL++,   |
+    | FLOSS, pyelftools,    |     | rr, pwntools, Z3,    |
+    | pefile, macholib      |     | boofuzz, Valgrind,   |
+    |                       |     | DynamoRIO, strace    |
+    +-----------+-----------+     +-----------+-----------+
+                |                             |
+                +---------- /workspace -------+
+                     (shared volume mount)
+```
+
+### Static-Dynamic Bridge
+
+reversing-mcp can export a JSON manifest of functions, strings, and imports via `export_dynamic_manifest`. pwn-mcp can import it via `import_static_analysis` and auto-set GDB breakpoints on discovered functions via `auto_set_breakpoints`. This eliminates manual address copying between static and dynamic analysis.
+
+## reversing-mcp
+
+Static binary analysis server with persistent sessions, artifact management, and structured results.
+
+### Capabilities
+
+- **Format support**: ELF, PE, Mach-O, ZIP, TAR, Intel HEX, SREC, raw blobs
+- **Analysis backends**: angr CFGFast, Ghidra headless decompiler
+- **Semantic recovery**: call graphs, CFGs, variables, stack frames, types, data-flow slicing, system calls
+- **Signatures**: YARA scanning, crypto constants, packer detection, compiler fingerprinting, FLOSS string deobfuscation
+- **Patching**: byte patches, assembly patches (x86/x64/ARM/AArch64/Thumb), code cave discovery
+- **Multi-artifact**: session-wide correlation, structural diffing, dependency analysis
+- **Workflow**: annotations with revision history, session snapshots, curated exports, composite brief workflows with token budgeting
+
+### Tool Groups (82 tools)
+
+| Group | Tools |
+|---|---|
+| Discovery | `describe_tools`, `get_capabilities`, `get_runtime_policies`, `run_parser_probe` |
+| Sessions | `create_session`, `load_session`, `list_sessions`, `destroy_session`, `update_session_settings` |
+| Artifacts | `add_artifact`, `list_artifacts`, `remove_artifact` |
+| Triage | `triage_artifact`, `list_artifact_strings`, `translate_artifact_address`, `list_artifact_children`, `lookup_external_enrichment` |
+| Analysis | `start_artifact_analysis`, `start_artifact_reanalysis`, `get_job`, `list_jobs`, `cancel_job`, `get_analysis_synopsis` |
+| Disassembly | `list_artifact_symbols`, `list_artifact_functions`, `disassemble_function`, `disassemble_range`, `decompile_function`, `read_artifact_bytes`, `get_artifact_instruction_mode`, `set_artifact_instruction_mode` |
+| Cross-refs | `list_artifact_xrefs`, `search_artifact`, `get_artifact_linkage`, `get_artifact_debug_info` |
+| Semantic | `get_call_graph`, `get_control_flow_graph`, `get_function_variables`, `get_stack_frame`, `get_constant_propagation`, `get_type_information`, `recover_types`, `inspect_data_segments`, `get_indirect_flows`, `get_exception_metadata`, `get_calling_convention`, `get_intermediate_representation`, `get_runtime_metadata`, `slice_data_flow`, `identify_system_calls`, `navigate_neighborhood`, `prioritize_functions`, `classify_functions` |
+| Signatures | `scan_with_yara`, `fingerprint_compiler_toolchain`, `detect_packer`, `calculate_entropy`, `deobfuscate_strings`, `detect_crypto_constants`, `recognize_library_code` |
+| Extraction | `extract_resources`, `carve_embedded_artifacts`, `get_artifact_relationships` |
+| Patching | `patch_artifact_bytes`, `patch_artifact_assembly`, `find_code_caves`, `edit_artifact_metadata`, `import_type_definitions` |
+| Multi-artifact | `list_artifact_dependencies`, `correlate_session_artifacts`, `diff_artifacts` |
+| Workflow | `save_workflow_item`, `list_workflow_items`, `register_provisional_function`, `register_provisional_string`, `get_object_reference`, `put_annotation`, `list_annotations`, `get_annotation_history`, `revert_annotation` |
+| Snapshots | `create_session_snapshot`, `list_session_snapshots`, `restore_session_snapshot` |
+| Exports | `export_curated_analysis`, `export_command_log`, `export_analysis_report`, `export_session_state`, `batch_query_artifacts` |
+| Composite briefs | `ingest_and_triage_artifact`, `analyze_and_summarize`, `hunt_interesting_regions`, `trace_capability`, `prepare_patch_plan`, `artifact_relationship_brief` |
+| Ghidra | `ghidra_decompile`, `ghidra_analyze`, `run_ghidra_script` |
+| Bridge | `export_dynamic_manifest` |
+
+### Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `REVERSING_MCP_WORKSPACE_ROOT` | `/workspace` | Workspace root for sessions and artifacts |
+| `REVERSING_MCP_LOG_LEVEL` | `INFO` | Server log level |
+| `REVERSING_MCP_MAX_INPUT_SIZE_BYTES` | — | Max accepted input size |
+| `REVERSING_MCP_MAX_ARTIFACTS_PER_SESSION` | — | Artifact count limit per session |
+| `REVERSING_MCP_PARSER_TIMEOUT_SECONDS` | — | Isolated parser timeout |
+| `REVERSING_MCP_PARSER_MEMORY_MB` | — | Isolated parser memory limit |
+| `REVERSING_MCP_HTTP_REQUIRE_AUTH` | `false` | Enable bearer token auth |
+| `REVERSING_MCP_HTTP_TOKENS` | — | Comma-separated `tenant=token` pairs |
+
+## pwn-mcp
+
+Dynamic analysis server for process control, debugging, instrumentation, fuzzing, and exploitation.
+
+### Capabilities
+
+- **Process control**: launch, I/O, signal, state inspection
+- **GDB debugging**: full GDB/MI integration with breakpoints, stepping, registers, memory, heap inspection
+- **Frida instrumentation**: function hooking, script injection, memory dump, export listing, call tracing
+- **Record/replay**: deterministic rr recording with reverse stepping
+- **Tracing**: strace (syscalls), ltrace (library calls), uftrace (call graphs), Valgrind (memory/performance)
+- **Fuzzing**: AFL++ with QEMU mode, boofuzz protocol fuzzing
+- **Exploit tools**: pwntools scripting, cyclic patterns, one_gadget, ROP gadgets, checksec
+- **Constraint solving**: Z3 scripts for offset/checksum/transformation solving
+- **libc management**: version identification, download, binary patching with patchelf
+- **Coverage**: DynamoRIO drcov collection and diffing
+- **Seccomp**: BPF filter analysis
+- **Cross-arch**: transparent QEMU user-mode for ARM, AArch64, MIPS, RISC-V, PowerPC, SPARC, s390x, m68k, SH4, Xtensa
+
+### Tool Groups (79 tools)
+
+| Group | Tools |
+|---|---|
+| Sessions | `create_execution_session`, `list_execution_sessions`, `destroy_execution_session` |
+| Process | `launch_binary`, `send_input`, `read_output`, `get_process_state`, `terminate_process` |
+| GDB | `start_debug_session`, `stop_debug_session`, `send_gdb_command`, `set_breakpoint`, `delete_breakpoint`, `list_breakpoints`, `continue_execution`, `step_instruction`, `step_over_instruction`, `step_into`, `step_over`, `finish_function`, `run_until`, `read_registers`, `write_register`, `read_memory`, `write_memory`, `search_memory`, `get_backtrace`, `get_locals`, `evaluate_expression`, `get_memory_maps`, `get_heap_info`, `get_libc_info` |
+| Frida | `start_frida_session`, `stop_frida_session`, `inject_script`, `hook_function`, `trace_calls`, `get_exports`, `get_memory_ranges`, `dump_memory` |
+| Record/replay | `start_rr_record`, `start_rr_replay`, `list_recordings`, `reverse_continue`, `reverse_step`, `reverse_next`, `reverse_finish` |
+| Tracing | `run_with_strace`, `run_with_ltrace`, `run_with_uftrace`, `run_with_valgrind`, `get_trace_output` |
+| Coverage | `run_with_coverage`, `get_coverage_report`, `diff_coverage` |
+| Fuzzing | `start_afl_session`, `get_fuzzer_status`, `get_crash_inputs`, `stop_fuzzer`, `minimize_input` |
+| Exploit | `checksec`, `run_pwntools_script`, `generate_cyclic_pattern`, `find_cyclic_offset`, `find_one_gadgets`, `get_rop_gadgets` |
+| Seccomp | `analyze_seccomp` |
+| Solver | `run_z3_script` |
+| Protocol fuzzing | `run_boofuzz_script` |
+| libc tools | `identify_libc`, `list_available_libcs`, `download_libc`, `patch_binary_libc`, `get_elf_metadata` |
+| Bridge | `import_static_analysis`, `auto_set_breakpoints` |
+| Jobs | `get_job`, `cancel_job`, `list_jobs` |
+
+### Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `PWN_MCP_WORKSPACE_ROOT` | `/workspace/binaries` | Binary input directory |
+| `PWN_MCP_OUTPUT_ROOT` | `/workspace/dynamic-output` | Output directory for traces, coverage, etc. |
+| `PWN_MCP_SESSIONS_ROOT` | `/tmp/pwn-mcp-sessions` | Session working directories |
+| `PWN_MCP_LOG_LEVEL` | `INFO` | Server log level |
+| `PWN_MCP_PORT` | `6768` | Server port |
+| `GDBINIT_FRAMEWORK` | `gef` | GDB enhancement framework (`gef` or `pwndbg`) |
+
+## Docker Compose Services
+
+| Service | Image | Port | Purpose |
+|---|---|---|---|
+| `reversing-mcp` | `reversing-mcp:compose` | 6767 | Static analysis server |
+| `pwn-mcp` | `pwn-mcp:compose` | 6768 | Dynamic analysis server (SYS_PTRACE enabled) |
+| `pwn-mcp-test` | `pwn-mcp:compose` | — | Test runner (profile: `test`) |
+
+```bash
+# Start both servers
+docker compose up -d --build
+
+# Run pwn-mcp tests
+docker compose --profile test run pwn-mcp-test
+
+# Run reversing-mcp tests
+docker exec -w /app reversing-mcp-compose pytest -q
+
+# View logs
+docker compose logs -f
+```
+
+## Host Requirements
+
+- Docker with Compose v2
+- For rr record/replay: `echo 1 > /proc/sys/kernel/perf_event_paranoid`
+- `SYS_PTRACE` capability is granted to pwn-mcp via docker-compose
+
+## Common Workflows
+
+### 1. Full Binary Analysis Pipeline
+
+```
+create_session -> add_artifact -> triage_artifact -> start_artifact_analysis
+-> list_artifact_functions -> decompile_function -> export_dynamic_manifest
+-> (pwn-mcp) create_execution_session -> import_static_analysis
+-> start_debug_session -> auto_set_breakpoints -> continue_execution
+```
+
+### 2. Vulnerability Research
+
+```
+(reversing-mcp) analyze_and_summarize -> hunt_interesting_regions
+-> trace_capability (on suspicious functions)
+-> (pwn-mcp) launch_binary -> run_with_strace
+-> start_debug_session -> set_breakpoint -> read_memory
+-> run_pwntools_script (craft exploit)
+```
+
+### 3. Fuzzing Campaign
+
+```
+(pwn-mcp) create_execution_session -> checksec
+-> start_afl_session -> get_fuzzer_status -> get_crash_inputs
+-> minimize_input -> start_debug_session (on crash input)
+-> get_backtrace -> read_registers
+```
+
+### 4. CTF Pwn Challenge
+
+```
+(reversing-mcp) ingest_and_triage_artifact -> analyze_and_summarize
+-> (pwn-mcp) checksec -> start_debug_session
+-> generate_cyclic_pattern -> find_cyclic_offset
+-> get_rop_gadgets -> find_one_gadgets
+-> run_pwntools_script (build exploit)
+-> run_z3_script (solve constraints)
+```
 
 ## Security Model
 
-`reversing-mcp` is a static-only analysis server.
-
-- Samples must live inside the configured workspace root.
-- The parser and analysis worker run in an isolated subprocess.
-- Shell execution against sample-controlled input is not part of the product model.
-- Extraction workflows preserve sanitized filenames and stay inside the configured resource limits.
+- **reversing-mcp**: static-only, no binary execution. Samples must live inside workspace root. Parser runs in isolated subprocess.
+- **pwn-mcp**: executes binaries in a sandboxed container with seccomp profile. Non-root user (UID 10002). Workspace binaries mounted read-only.
 
 ## Documentation
 
-The complete user guide is in `docs/`.
-
-- [Overview](docs/overview.md)
-- [Getting Started](docs/getting-started.md)
-- [Workflows](docs/workflows.md)
-- [Tool Reference](docs/tool-reference.md)
-- [Requirements Matrix](docs/requirements-matrix.md)
-
-## Test
-
-Run tests inside the container:
-
-```bash
-docker exec -w /app reversing-mcp-compose pytest -q
-```
-
-Or locally in a suitable environment:
-
-```bash
-pytest
-```
+- [Overview](docs/overview.md) — architecture and feature summary
+- [Getting Started](docs/getting-started.md) — first session walkthrough
+- [Workflows](docs/workflows.md) — common analysis patterns
+- [Tool Reference](docs/tool-reference.md) — complete reversing-mcp tool catalog
+- [PWN-MCP Tool Reference](docs/pwn-tool-reference.md) — complete pwn-mcp tool catalog
+- [Cross-Server Workflows](docs/cross-server-workflows.md) — static-dynamic bridge patterns
+- [Requirements Matrix](docs/requirements-matrix.md) — requirements traceability

@@ -443,6 +443,37 @@ Shared controls:
 
 - Purpose: queue reanalysis and invalidate generation-scoped function/string IDs on completion
 
+## Ghidra Headless Analysis
+
+### `ghidra_decompile(session_id, artifact_id, address, timeout_seconds?)`
+
+- Purpose: decompile a function using the Ghidra headless decompiler
+- Use when: angr decompilation is insufficient for complex binaries, or when higher-quality pseudo-C output is needed
+- Prerequisites: `add_artifact`
+- Notes: requires Ghidra to be installed in the container (`/opt/ghidra`)
+
+### `ghidra_analyze(session_id, artifact_id, timeout_seconds?)`
+
+- Purpose: run full Ghidra headless analysis and export functions, strings, imports, and sections
+- Use when: you want a comprehensive analysis from a second backend to complement angr
+- Prerequisites: `add_artifact`
+
+### `run_ghidra_script(session_id, artifact_id, script, timeout_seconds?)`
+
+- Purpose: run a custom Ghidra Python script against an artifact binary
+- Use when: you need specialized analysis not covered by the built-in tools
+- Notes: script runs in Ghidra's Jython environment with full Ghidra API access
+
+## Cross-Server Bridge
+
+### `export_dynamic_manifest(session_id, artifact_id, output_path?)`
+
+- Purpose: export a JSON manifest of functions, strings, imports, and addresses for use by a dynamic analysis tool
+- Use when: handing off from static analysis to dynamic analysis in `pwn-mcp`
+- Prerequisites: `start_artifact_analysis` (analysis must be complete)
+- Output: JSON file written to the shared workspace volume containing function names/addresses, strings, imports, and artifact metadata
+- Companion tool: `import_static_analysis` in `pwn-mcp` reads these manifests
+
 ## Notes On Limits And Partial Results
 
 - Extraction and carving may return `partial=true`

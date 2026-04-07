@@ -1,0 +1,214 @@
+FROM ubuntu:24.04
+
+# ── Environment ──────────────────────────────────────────────────────────────
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PWN_MCP_WORKSPACE_ROOT=/workspace/binaries \
+    PWN_MCP_OUTPUT_ROOT=/workspace/dynamic-output \
+    PWN_MCP_SESSIONS_ROOT=/tmp/pwn-mcp-sessions
+
+WORKDIR /app
+
+# ── Phase 1: base OS + Python + QEMU user-mode ───────────────────────────────
+RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
+    && apt-get install -y --no-install-recommends \
+    # Python
+    python3 python3-dev python3-pip python3-venv \
+    # Build tools (needed by later layers)
+    build-essential git curl wget ca-certificates unzip \
+    # QEMU user-mode static binaries (all architectures)
+    qemu-user qemu-user-static \
+    # binfmt_misc support (registration handled at runtime)
+    binfmt-support \
+    # Binary analysis utilities
+    file binutils patchelf \
+    && rm -rf /var/lib/apt/lists/*
+
+# Validate
+RUN python3 --version && qemu-x86_64-static --version
+
+# ── Phase 2: GDB multiarch + GEF + pwndbg ────────────────────────────────────
+RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
+    && apt-get install -y --no-install-recommends \
+    gdb-multiarch \
+    gdbserver \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install GEF (raw from main branch — release assets may not exist)
+RUN wget -O /root/.gdbinit-gef.py \
+    https://raw.githubusercontent.com/hugsy/gef/main/gef.py \
+    && echo 'source /root/.gdbinit-gef.py' > /root/.gdbinit-gef
+
+# Install pwndbg
+RUN git clone --depth=1 https://github.com/pwndbg/pwndbg /opt/pwndbg \
+    && cd /opt/pwndbg \
+    && pip install --no-cache-dir --break-system-packages . \
+    && echo 'source /opt/pwndbg/gdbinit.py' > /root/.gdbinit-pwndbg
+
+# Wrapper script: select GEF or pwndbg via GDBINIT_FRAMEWORK env var
+RUN printf '#!/bin/sh\n\
+FRAMEWORK="${GDBINIT_FRAMEWORK:-gef}"\n\
+if [ "$FRAMEWORK" = "pwndbg" ]; then\n\
+  cp /root/.gdbinit-pwndbg /root/.gdbinit\n\
+else\n\
+  cp /root/.gdbinit-gef /root/.gdbinit\n\
+fi\n\
+exec gdb-multiarch "$@"\n' > /usr/local/bin/gdb-fw \
+    && chmod +x /usr/local/bin/gdb-fw
+
+# Validate
+RUN gdb-multiarch --version
+
+# ── Phase 3: tracing tools ────────────────────────────────────────────────────
+RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
+    && apt-get install -y --no-install-recommends \
+    strace \
+    ltrace \
+    valgrind \
+    # uftrace build dependencies
+    libelf-dev libdw-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# uftrace from source (apt version is stale)
+RUN git clone --depth=1 https://github.com/namhyung/uftrace /tmp/uftrace \
+    && cd /tmp/uftrace \
+    && ./configure && make -j$(nproc) && make install \
+    && rm -rf /tmp/uftrace
+
+# Validate
+RUN strace --version && valgrind --version && uftrace --version
+
+# ── Phase 4: Frida + DynamoRIO ────────────────────────────────────────────────
+RUN pip install --break-system-packages frida frida-tools
+
+# DynamoRIO prebuilt release (arch-aware; cronbuild numbering)
+ARG DYNAMORIO_BUILD=11.91.20536
+RUN set -eux; \
+    ARCH="$(uname -m)"; \
+    if [ "$ARCH" = "aarch64" ]; then \
+        DR_PREFIX="DynamoRIO-AArch64-Linux"; \
+    else \
+        DR_PREFIX="DynamoRIO-Linux"; \
+    fi; \
+    DR_URL="https://github.com/DynamoRIO/dynamorio/releases/download/cronbuild-${DYNAMORIO_BUILD}/${DR_PREFIX}-${DYNAMORIO_BUILD}.tar.gz"; \
+    wget -qO /tmp/dr.tar.gz "${DR_URL}"; \
+    tar -xzf /tmp/dr.tar.gz -C /opt; \
+    ln -sf /opt/${DR_PREFIX}-${DYNAMORIO_BUILD} /opt/dynamorio; \
+    rm /tmp/dr.tar.gz
+
+ENV PATH="/opt/dynamorio/bin64:${PATH}"
+
+# Validate
+RUN frida --version && drrun -version
+
+# ── Phase 5: rr record/replay (x86/x86_64 only) ──────────────────────────────
+RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
+    && apt-get install -y --no-install-recommends \
+    capnproto libcapnp-dev python3-pexpect \
+    && rm -rf /var/lib/apt/lists/*
+
+# rr provides prebuilt debs for both x86_64 and aarch64
+ARG RR_VERSION=5.9.0
+RUN set -eux; \
+    ARCH="$(uname -m)"; \
+    RR_URL="https://github.com/rr-debugger/rr/releases/download/${RR_VERSION}/rr-${RR_VERSION}-Linux-${ARCH}.deb"; \
+    wget -qO /tmp/rr.deb "${RR_URL}"; \
+    dpkg -i /tmp/rr.deb || (apt-get install -f -y && dpkg -i /tmp/rr.deb); \
+    rm /tmp/rr.deb
+
+# Validate
+RUN rr --version
+
+# ── Phase 6: AFL++ with QEMU mode ─────────────────────────────────────────────
+RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
+    && apt-get install -y --no-install-recommends \
+    clang llvm lld \
+    libglib2.0-dev libpixman-1-dev \
+    python3-setuptools meson \
+    ninja-build \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth=1 https://github.com/AFLplusplus/AFLplusplus /opt/AFLplusplus \
+    && cd /opt/AFLplusplus \
+    && make source-only -j$(nproc) \
+    && make install \
+    && cd qemu_mode \
+    && CPU_TARGET=x86_64 ./build_qemu_support.sh \
+    && CPU_TARGET=aarch64 ./build_qemu_support.sh \
+    && CPU_TARGET=mipsel ./build_qemu_support.sh \
+    && CPU_TARGET=riscv64 ./build_qemu_support.sh
+
+ENV PATH="/opt/AFLplusplus:${PATH}"
+
+# Validate
+RUN afl-fuzz --version
+
+# ── Phase 7: exploit toolchain ────────────────────────────────────────────────
+RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
+    && apt-get install -y --no-install-recommends \
+    ruby ruby-dev \
+    rubygems \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python exploit tools
+RUN pip install --break-system-packages pwntools ropper ROPgadget z3-solver boofuzz
+
+# Ruby tools
+RUN gem install one_gadget seccomp-tools --no-document
+
+# checksec
+RUN wget -qO /usr/local/bin/checksec \
+    https://raw.githubusercontent.com/slimm609/checksec.sh/master/checksec \
+    && chmod +x /usr/local/bin/checksec
+
+# glibc-all-in-one for libc version swapping
+RUN git clone --depth=1 https://github.com/matrix1001/glibc-all-in-one /opt/glibc-all-in-one
+
+# libc-database for leak-based identification
+RUN git clone --depth=1 https://github.com/niklasb/libc-database /opt/libc-database
+
+# Validate
+RUN python3 -c "import pwn; print('pwntools:', pwn.version)" \
+    && ropper --version \
+    && one_gadget --version \
+    && checksec --version \
+    && seccomp-tools --version
+
+# ── Application ───────────────────────────────────────────────────────────────
+COPY src ./src
+COPY pyproject.toml README.md ./
+RUN pip install --break-system-packages . && \
+    pip install --break-system-packages pytest pytest-timeout
+
+COPY tests ./tests
+COPY test_binaries ./test_binaries
+
+# Compile test binaries
+RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
+    && apt-get install -y --no-install-recommends \
+    gcc-aarch64-linux-gnu \
+    gcc-mipsel-linux-gnu \
+    gcc-riscv64-linux-gnu \
+    libc6-dev-mipsel-cross \
+    libc6-dev-riscv64-cross \
+    libseccomp-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && make -C test_binaries all
+
+# ── Security hardening ────────────────────────────────────────────────────────
+RUN useradd --create-home --uid 10002 analyzer \
+    && mkdir -p /workspace/binaries /workspace/dynamic-output /tmp/pwn-mcp-sessions \
+    && chown -R analyzer:analyzer /app /workspace/dynamic-output /tmp/pwn-mcp-sessions
+
+# ── Entrypoint ────────────────────────────────────────────────────────────────
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+USER analyzer
+
+EXPOSE 6768
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["pwn-mcp"]

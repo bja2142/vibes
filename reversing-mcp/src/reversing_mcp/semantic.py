@@ -7,6 +7,7 @@ from typing import Any
 from .triage import translate_value
 
 IMMEDIATE_RE = re.compile(r"(?:^|[^A-Za-z0-9_])(0x[0-9a-fA-F]+|\d+)(?:$|[^A-Za-z0-9_])")
+_GENERIC_NAME_RE = re.compile(r"^sub_[0-9A-Fa-f]+$")
 STACK_ACCESS_RE = re.compile(r"\[(sp|x29|fp|rbp|ebp),\s*#?(-?0x[0-9a-fA-F]+|-?\d+)")
 REGISTER_RE = re.compile(r"\b([wxvsdq][0-9]+|x29|x30|sp|fp|lr|r(?:ax|bx|cx|dx|si|di|bp|sp|8|9|10|11|12|13|14|15)|e(?:ax|bx|cx|dx|si|di|bp|sp)|[abcd]l)\b")
 PRINTABLE_ASCII = set(range(0x20, 0x7F))
@@ -466,6 +467,10 @@ def _score_function(
     if "runtime_init" in noisy_tags:
         score -= 10
         evidence.append("Runtime initialization code is deprioritized.")
+    name = function.get("name", "")
+    if not function.get("is_plt") and name and not _GENERIC_NAME_RE.match(name):
+        score += 25
+        evidence.append("Non-generic symbol name raises triage priority.")
     score = max(0, min(100, score))
     return {
         "score": score,

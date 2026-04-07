@@ -1,4 +1,57 @@
 services:
+  pwn-mcp:
+    container_name: pwn-mcp-compose
+    build:
+      context: ./pwn-mcp
+      dockerfile: Dockerfile.dynamic
+    image: pwn-mcp:compose
+    init: true
+    restart: unless-stopped
+    user: "10002:10002"
+    environment:
+      PWN_MCP_WORKSPACE_ROOT: /workspace/binaries
+      PWN_MCP_OUTPUT_ROOT: /workspace/dynamic-output
+      PWN_MCP_SESSIONS_ROOT: /tmp/pwn-mcp-sessions
+      GDBINIT_FRAMEWORK: ${GDBINIT_FRAMEWORK:-gef}
+      PWN_MCP_PORT: ${PWN_MCP_PORT:-6768}
+      PWN_MCP_LOG_LEVEL: ${PWN_MCP_LOG_LEVEL:-INFO}
+    command:
+      - pwn-mcp
+      - --transport
+      - sse
+      - --host
+      - 0.0.0.0
+      - --port
+      - ${PWN_MCP_PORT:-6768}
+    ports:
+      - "${PWN_MCP_PORT:-6768}:${PWN_MCP_PORT:-6768}"
+    cap_add:
+      - SYS_PTRACE        # required for GDB, strace, rr
+    security_opt:
+      - seccomp=pwn-mcp/seccomp/dynamic-analysis.json
+    volumes:
+      - ./runtime/workspace:/workspace/binaries:ro
+      - ./runtime/dynamic-output:/workspace/dynamic-output
+    # Test runner variant — override CMD to run pytest
+    profiles: []
+
+  pwn-mcp-test:
+    container_name: pwn-mcp-test
+    build:
+      context: ./pwn-mcp
+      dockerfile: Dockerfile.dynamic
+    image: pwn-mcp:compose
+    user: "root"           # tests need root for perf_event_paranoia etc.
+    environment:
+      PWN_MCP_WORKSPACE_ROOT: /app/test_binaries
+      PWN_MCP_OUTPUT_ROOT: /tmp/test-output
+      PWN_MCP_SESSIONS_ROOT: /tmp/test-sessions
+    command: ["python3", "-m", "pytest", "tests/", "-v", "--timeout=120"]
+    volumes:
+      - ./runtime/workspace:/workspace/binaries:ro
+    profiles:
+      - test
+
   reversing-mcp:
     container_name: reversing-mcp-compose
     build:

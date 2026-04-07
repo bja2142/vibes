@@ -23,6 +23,7 @@ RUN apt-get update \
         curl \
         file \
         openjdk-21-jdk-headless \
+        libyara-dev \
         ssdeep \
         unzip \
     && mkdir -p /opt/java \
@@ -47,6 +48,8 @@ COPY src ./src
 
 RUN python -m pip install --no-deps .
 
+COPY docs ./docs
+COPY features ./features
 COPY tests ./tests
 
 RUN useradd --create-home --uid 10001 appuser \

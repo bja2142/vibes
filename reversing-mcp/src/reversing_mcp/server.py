@@ -7,8 +7,9 @@ import os
 import time
 from contextlib import AsyncExitStack, asynccontextmanager
 from functools import wraps
-from typing import Any
+from typing import Annotated, Any
 
+from pydantic import Field
 from mcp.server.fastmcp import FastMCP
 
 from .app import ReversingMCPApp
@@ -1110,6 +1111,44 @@ def _artifact_relationship_brief(
         include_next_actions,
         include_raw_sections,
     )
+
+
+@expose("ghidra_decompile")
+def _ghidra_decompile(
+    session_id: str,
+    artifact_id: str,
+    address: int | str = 0,
+    timeout_seconds: Annotated[int, Field(description="Max seconds for Ghidra decompilation. Increase for large or heavily-obfuscated binaries. Default: 300.")] = 300,
+) -> dict[str, Any]:
+    """Decompile a function using the Ghidra headless decompiler."""
+    return APP.ghidra_decompile(session_id, artifact_id, address, timeout_seconds)
+
+
+@expose("ghidra_analyze")
+def _ghidra_analyze(
+    session_id: str,
+    artifact_id: str,
+    timeout_seconds: Annotated[int, Field(description="Max seconds for full Ghidra analysis. Increase for large binaries. Default: 600.")] = 600,
+) -> dict[str, Any]:
+    """Run full Ghidra headless analysis and export functions, strings, imports, and sections."""
+    return APP.ghidra_analyze(session_id, artifact_id, timeout_seconds)
+
+
+@expose("run_ghidra_script")
+def _run_ghidra_script(
+    session_id: str,
+    artifact_id: str,
+    script: str = "",
+    timeout_seconds: Annotated[int, Field(description="Max seconds before the script is killed. Increase for complex analysis scripts. Default: 300.")] = 300,
+) -> dict[str, Any]:
+    """Run a custom Ghidra Python script against an artifact binary."""
+    return APP.run_ghidra_script(session_id, artifact_id, script, timeout_seconds)
+
+
+@expose("export_dynamic_manifest")
+def _export_dynamic_manifest(session_id: str, artifact_id: str, output_path: str | None = None) -> dict[str, Any]:
+    """Export a JSON manifest for use by dynamic analysis tools (pwn-mcp)."""
+    return APP.export_dynamic_manifest(session_id, artifact_id, output_path)
 
 
 def main() -> None:

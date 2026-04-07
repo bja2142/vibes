@@ -17,8 +17,10 @@ docker compose up -d --build
 
 Default network endpoints:
 
-- Streamable HTTP MCP: `http://127.0.0.1:6767/mcp`
-- SSE MCP: `http://127.0.0.1:6767/sse`
+- reversing-mcp (static): `http://127.0.0.1:6767/sse`
+- pwn-mcp (dynamic): `http://127.0.0.1:6768/sse`
+
+Both servers support SSE and streamable HTTP protocols at the `/sse` endpoint. Streamable HTTP at `/mcp` is also available for reversing-mcp.
 
 Optional HTTP auth and quota environment variables:
 
@@ -145,3 +147,17 @@ Every tool returns the same top-level shape:
 - HTTP auth is optional and off by default; tokens only take effect when `REVERSING_MCP_HTTP_REQUIRE_AUTH=true`.
 - Composite brief tools intentionally return bounded previews; use the lower-level tools when you need complete tables or wider raw context.
 - `token_budget_hint` can clamp a requested `verbosity` level down to a smaller response profile.
+
+## Using Both Servers Together
+
+If both `reversing-mcp` and `pwn-mcp` are running, you can bridge static and dynamic analysis:
+
+```json
+{"server": "reversing-mcp", "tool": "export_dynamic_manifest", "arguments": {"session_id": "sess_...", "artifact_id": "art_..."}}
+{"server": "pwn-mcp", "tool": "create_execution_session", "arguments": {"name": "debug"}}
+{"server": "pwn-mcp", "tool": "import_static_analysis", "arguments": {"session_id": "exec_...", "manifest_path": "/workspace/dynamic-output/manifest_art_xxx.json"}}
+{"server": "pwn-mcp", "tool": "start_debug_session", "arguments": {"session_id": "exec_...", "binary_path": "/workspace/binaries/target.elf"}}
+{"server": "pwn-mcp", "tool": "auto_set_breakpoints", "arguments": {"session_id": "exec_...", "debug_id": "dbg_...", "manifest_path": "/workspace/dynamic-output/manifest_art_xxx.json"}}
+```
+
+See [Cross-Server Workflows](cross-server-workflows.md) for complete patterns.

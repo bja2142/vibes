@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .analysis import analysis_backend_status
+from .ghidra import ghidra_available, ghidra_decompile_function, ghidra_export_analysis, ghidra_run_custom_script
 from .config import SERVER_NAME, SERVER_VERSION
 from .errors import StructuredToolError
 from .feature07 import (
@@ -675,6 +676,30 @@ TOOL_CATALOG = [
             "include_next_actions?",
             "include_raw_sections?",
         ],
+    },
+    {
+        "name": "ghidra_decompile",
+        "description": "Decompile a function using the Ghidra headless decompiler (higher quality than angr for complex binaries).",
+        "prerequisites": ["add_artifact"],
+        "parameters": ["session_id", "artifact_id", "address", "timeout_seconds?"],
+    },
+    {
+        "name": "ghidra_analyze",
+        "description": "Run full Ghidra headless analysis on an artifact and export functions, strings, imports, and sections.",
+        "prerequisites": ["add_artifact"],
+        "parameters": ["session_id", "artifact_id", "timeout_seconds?"],
+    },
+    {
+        "name": "run_ghidra_script",
+        "description": "Run a custom Ghidra Python script against an artifact binary. Script runs in Ghidra's Jython environment with full API access.",
+        "prerequisites": ["add_artifact"],
+        "parameters": ["session_id", "artifact_id", "script", "timeout_seconds?"],
+    },
+    {
+        "name": "export_dynamic_manifest",
+        "description": "Export a JSON manifest of functions, strings, imports, and addresses for use by a dynamic analysis tool (pwn-mcp). Writes to the shared workspace volume.",
+        "prerequisites": ["start_artifact_analysis"],
+        "parameters": ["session_id", "artifact_id", "output_path?"],
     },
 ]
 
@@ -1515,6 +1540,7 @@ class ReversingMCPApp:
         cursor: int = 0,
         limit: int = 50,
         query: str | None = None,
+        include_plt: bool = False,
     ) -> dict[str, Any]:
         parameters = {
             "session_id": session_id,
@@ -1522,11 +1548,14 @@ class ReversingMCPApp:
             "cursor": cursor,
             "limit": limit,
             "query": query,
+            "include_plt": include_plt,
         }
 
         def operation() -> dict[str, Any]:
             artifact, analysis = self._load_analysis_context(session_id, artifact_id)
             items = list(analysis["functions"])
+            if not include_plt:
+                items = [item for item in items if not item.get("is_plt")]
             if query:
                 needle = query.lower()
                 def _query_rank(item: dict[str, Any]) -> tuple[int, int, int, str]:
@@ -4853,3 +4882,127 @@ class ReversingMCPApp:
                 "truncated": next_cursor is not None,
             },
         }
+
+    # ── Ghidra headless tools ────────────────────────────────────────────────
+
+    def ghidra_decompile(
+        self,
+        session_id: str,
+        artifact_id: str,
+        address: int | str,
+        timeout_seconds: int = 300,
+    ) -> dict[str, Any]:
+        parameters = {"session_id": session_id, "artifact_id": artifact_id, "address": address, "timeout_seconds": timeout_seconds}
+
+        def operation() -> dict[str, Any]:
+            if not ghidra_available():
+                raise StructuredToolError("missing_prerequisite", "ghidra_not_installed", "Ghidra headless is not available in this container.")
+            artifact = self.store.get_artifact_record(session_id=session_id, artifact_id=artifact_id)
+            addr = self._normalize_numeric_value(address)
+            result = ghidra_decompile_function(artifact["canonical_path"], function_address=addr, timeout_seconds=int(timeout_seconds))
+            return {"artifact": self._artifact_reference(artifact), **result.get("result", result)}
+
+        return self._respond("ghidra_decompile", parameters, operation)
+
+    def ghidra_analyze(
+        self,
+        session_id: str,
+        artifact_id: str,
+        timeout_seconds: int = 600,
+    ) -> dict[str, Any]:
+        parameters = {"session_id": session_id, "artifact_id": artifact_id, "timeout_seconds": timeout_seconds}
+
+        def operation() -> dict[str, Any]:
+            if not ghidra_available():
+                raise StructuredToolError("missing_prerequisite", "ghidra_not_installed", "Ghidra headless is not available in this container.")
+            artifact = self.store.get_artifact_record(session_id=session_id, artifact_id=artifact_id)
+            result = ghidra_export_analysis(artifact["canonical_path"], timeout_seconds=int(timeout_seconds))
+            return {"artifact": self._artifact_reference(artifact), **result.get("result", result)}
+
+        return self._respond("ghidra_analyze", parameters, operation)
+
+    def run_ghidra_script(
+        self,
+        session_id: str,
+        artifact_id: str,
+        script: str,
+        timeout_seconds: int = 300,
+    ) -> dict[str, Any]:
+        parameters = {"session_id": session_id, "artifact_id": artifact_id, "script": script[:200], "timeout_seconds": timeout_seconds}
+
+        def operation() -> dict[str, Any]:
+            if not ghidra_available():
+                raise StructuredToolError("missing_prerequisite", "ghidra_not_installed", "Ghidra headless is not available in this container.")
+            artifact = self.store.get_artifact_record(session_id=session_id, artifact_id=artifact_id)
+            result = ghidra_run_custom_script(artifact["canonical_path"], script_content=script, timeout_seconds=int(timeout_seconds))
+            return {"artifact": self._artifact_reference(artifact), **result.get("result", result)}
+
+        return self._respond("run_ghidra_script", parameters, operation)
+
+    # ── Cross-server bridge ──────────────────────────────────────────────────
+
+    def export_dynamic_manifest(
+        self,
+        session_id: str,
+        artifact_id: str,
+        output_path: str | None = None,
+    ) -> dict[str, Any]:
+        parameters = {"session_id": session_id, "artifact_id": artifact_id, "output_path": output_path}
+
+        def operation() -> dict[str, Any]:
+            artifact, analysis = self._load_analysis_context(session_id, artifact_id)
+
+            functions = [
+                {"name": f["name"], "address": hex(int(f["address"])), "address_int": int(f["address"]), "size": f.get("size", 0)}
+                for f in analysis.get("functions", [])
+            ]
+            strings = [
+                {"value": s.get("value", ""), "address": hex(int(s["address"])), "address_int": int(s["address"])}
+                for s in analysis.get("strings", [])
+                if s.get("address") is not None
+            ]
+            imports = [
+                {"name": s["name"], "address": hex(int(s["address"])), "address_int": int(s["address"]), "library": s.get("library")}
+                for s in analysis.get("symbols", [])
+                if s.get("kind") == "import"
+            ]
+
+            caps = analysis.get("capabilities", {})
+            summary = analysis.get("summary", {})
+
+            manifest = {
+                "schema_version": 1,
+                "source": "reversing-mcp",
+                "binary": artifact["display_name"],
+                "canonical_path": artifact["canonical_path"],
+                "architecture": caps.get("architecture", "unknown"),
+                "bitness": caps.get("bitness"),
+                "endianness": caps.get("endianness"),
+                "entry_point": hex(int(summary.get("entry_point", 0))),
+                "image_base": hex(int(summary.get("image_base", 0))),
+                "function_count": len(functions),
+                "string_count": len(strings),
+                "import_count": len(imports),
+                "functions": functions,
+                "strings": strings[:2000],
+                "imports": imports,
+            }
+
+            if output_path:
+                target = self.security.resolve_output_file(output_path, purpose="Dynamic manifest export")
+            else:
+                safe_name = artifact.get("safe_display_name", "artifact")
+                target = Path(self.store.workspace_root) / ".analysis" / f"{safe_name}.manifest.json"
+                target.parent.mkdir(parents=True, exist_ok=True)
+
+            target.write_text(json.dumps(manifest, indent=2))
+
+            return {
+                "artifact": self._artifact_reference(artifact),
+                "manifest_path": str(target),
+                "function_count": len(functions),
+                "string_count": len(strings),
+                "import_count": len(imports),
+            }
+
+        return self._respond("export_dynamic_manifest", parameters, operation)

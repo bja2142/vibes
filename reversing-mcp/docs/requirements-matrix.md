@@ -68,7 +68,7 @@ This matrix maps `requirements.md` references to the current implementation. Sta
 | Symbol Demangling | Implemented | analysis backend demangling in `analysis.py` |
 | Function Enumeration | Implemented | `list_artifact_functions` |
 | Targeted Disassembly | Implemented | `disassemble_function`, `disassemble_range` |
-| Targeted Decompilation | Implemented | `decompile_function` |
+| Targeted Decompilation | Implemented | `decompile_function`, `ghidra_decompile` |
 | Raw Byte Inspection | Implemented | `read_artifact_bytes` |
 | Cross-References | Implemented | `list_artifact_xrefs` |
 | Basic Program Search | Implemented | `search_artifact` |
@@ -156,7 +156,7 @@ This matrix maps `requirements.md` references to the current implementation. Sta
 | Requirement | Status | Primary implementation |
 | --- | --- | --- |
 | Analysis Database Import | Deferred | not implemented in this phase |
-| Analysis Database Export | Partial | JSON/session/curated/report exports exist; BinExport/SARIF deferred |
+| Analysis Database Export | Partial | JSON/session/curated/report exports exist; `export_dynamic_manifest` for pwn-mcp bridge; BinExport/SARIF deferred |
 | Signature Pack Management | Deferred | not implemented in this phase |
 
 ## §11 Container, Security, And Operational Requirements

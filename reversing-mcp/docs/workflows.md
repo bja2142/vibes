@@ -207,3 +207,38 @@ Budget controls:
 - `verbosity=brief|normal|deep`
 - `token_budget_hint` to clamp payload size
 - `include_raw_sections=true` only when you need bounded raw previews
+
+## 10. Ghidra Headless Analysis
+
+Use this when angr decompilation is insufficient or you need a second-opinion analysis.
+
+Recommended sequence:
+
+1. `ghidra_decompile` for a specific function
+2. `ghidra_analyze` for full artifact analysis (functions, strings, imports, sections)
+3. `run_ghidra_script` for custom analysis scripts
+
+Use cases:
+
+- Get higher-quality pseudo-C for complex functions
+- Cross-reference angr results with Ghidra output
+- Run specialized Ghidra plugins or analysis scripts
+
+## 11. Static-Dynamic Bridge
+
+Use this when handing off from static analysis in reversing-mcp to dynamic analysis in pwn-mcp.
+
+Recommended sequence:
+
+1. Complete static analysis (`start_artifact_analysis`, wait for completion)
+2. `export_dynamic_manifest` (writes JSON to shared workspace)
+3. In pwn-mcp: `import_static_analysis` (reads the manifest)
+4. In pwn-mcp: `auto_set_breakpoints` (sets GDB breakpoints on discovered functions)
+
+Use cases:
+
+- Transfer function addresses from static to dynamic analysis without manual copying
+- Auto-set breakpoints on all interesting functions before debugging
+- Feed static analysis results into exploit development workflows
+
+See [Cross-Server Workflows](cross-server-workflows.md) for complete end-to-end patterns.

@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pwn-mcp"
+version = "0.1.0"
+description = "Dynamic analysis MCP server — process control, GDB, Frida, AFL++, and exploit toolchain"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp[cli]>=1.0.0",
+    "uvicorn>=0.30.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-timeout>=2.3.0",
+]
+
+[project.scripts]
+pwn-mcp = "pwn_mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+timeout = 120
+markers = [
+    "slow: marks tests as slow (fuzzing campaigns, long traces)",
+    "requires_rr: marks tests that need perf_event_paranoia <= 1",
+    "requires_root: marks tests that need elevated privileges",
+]

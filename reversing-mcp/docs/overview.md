@@ -40,9 +40,12 @@ Analysis-derived object IDs are generation-scoped. When an artifact is reanalyze
 ### Core Analysis
 
 - Async program analysis with `angr CFGFast`
+- Ghidra headless decompilation for higher-quality pseudo-C output on complex binaries
+- Ghidra headless full analysis export (functions, strings, imports, sections)
+- Custom Ghidra Python script execution with full API access
 - Function and symbol enumeration
 - Disassembly and disassembly-range queries
-- Best-effort pseudo-C decompilation
+- Best-effort pseudo-C decompilation (angr) and Ghidra decompilation
 - Raw byte inspection
 - Cross-reference queries
 - Search across strings, names, immediates, opcodes, and ranges
@@ -118,8 +121,16 @@ The server is designed for static-only workflows.
 - Input size, parser timeout, parser memory, parser CPU, recursion depth, string counts, artifact counts, and carved bytes are all capped
 - Derived outputs use sanitized filenames and workspace-safe output paths
 
+### Cross-Server Bridge
+
+- JSON manifest export for dynamic analysis tools via `export_dynamic_manifest`
+- Designed for use with the companion `pwn-mcp` dynamic analysis server
+- Exports function addresses, strings, imports, and artifact metadata to a shared workspace volume
+
 ## Recommended Reading
 
 - [Getting Started](getting-started.md)
 - [Workflows](workflows.md)
 - [Tool Reference](tool-reference.md)
+- [PWN-MCP Tool Reference](pwn-tool-reference.md)
+- [Cross-Server Workflows](cross-server-workflows.md)

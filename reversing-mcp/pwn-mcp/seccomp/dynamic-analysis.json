@@ -1,0 +1,29 @@
+{
+  "defaultAction": "SCMP_ACT_ALLOW",
+  "syscalls": [
+    {
+      "names": [
+        "mount", "umount2", "pivot_root", "chroot",
+        "kexec_load", "kexec_file_load",
+        "init_module", "finit_module", "delete_module",
+        "create_module", "query_module",
+        "nfsservctl", "get_kernel_syms",
+        "uselib", "sysfs",
+        "iopl", "ioperm", "iopl",
+        "swapon", "swapoff",
+        "settimeofday", "adjtimex", "clock_adjtime",
+        "sethostname", "setdomainname",
+        "acct"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "args": [],
+      "comment": "Block privileged syscalls that could affect host or escape container"
+    },
+    {
+      "names": ["ptrace", "process_vm_readv", "process_vm_writev", "perf_event_open"],
+      "action": "SCMP_ACT_ALLOW",
+      "args": [],
+      "comment": "Explicitly allow ptrace-family for GDB, strace, rr"
+    }
+  ]
+}
