@@ -1,0 +1,9 @@
+.venv/
+.model_mcp/
+.mcp-server.log
+tmp/
+debates/
+*.stdout.log
+*.stderr.log
+__pycache__/
+*.pyc

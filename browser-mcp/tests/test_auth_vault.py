@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -11,6 +12,8 @@ from browser_puppet.server import BrowserPuppetApp
 class FakeLocator:
     def __init__(self) -> None:
         self.filled = []
+        self.clicked = 0
+        self.submitted = 0
 
     async def fill(self, value: str) -> None:
         self.filled.append(value)
@@ -24,9 +27,32 @@ class FakeLocator:
     async def uncheck(self) -> None:
         return None
 
+    async def click(self, **kwargs) -> None:
+        self.clicked += 1
+
+    async def evaluate(self, script: str, *args) -> dict[str, bool]:
+        if "requestSubmit" in script:
+            self.submitted += 1
+            return {"submitted": True}
+        return {"submitted": False}
+
 
 class FakePage:
     url = "https://example.test"
+
+    class Keyboard:
+        def __init__(self) -> None:
+            self.typed = []
+            self.pressed = []
+
+        async def type(self, text: str, delay: int | None = None) -> None:
+            self.typed.append((text, delay))
+
+        async def press(self, key: str) -> None:
+            self.pressed.append(key)
+
+    def __init__(self) -> None:
+        self.keyboard = self.Keyboard()
 
     def is_closed(self) -> bool:
         return False
@@ -74,9 +100,19 @@ async def test_type_text_resolves_credential_alias() -> None:
     app, context, _, locator = register_app()
     context.credentials["admin_password"] = "secret"
 
-    await app.type_text("{{cred:admin_password}}", page_id="page-1")
+    await app.type_text("{{cred:admin_password}}", page_id="page-1", target={"selector": "#admin-password"})
 
     assert locator.filled[-1] == "secret"
+
+
+@pytest.mark.asyncio
+async def test_type_text_keystroke_defaults_choose_randomized_timings() -> None:
+    app, _, page_state, _ = register_app()
+
+    with patch("browser_puppet.server.random.randint", side_effect=[41, 13, -3, 7, 0]):
+        await app.type_text("abc", page_id=page_state.page_id, clear_first=False, typing_mode="keystrokes")
+
+    assert page_state.playwright_page.keyboard.typed == [("a", 38), ("b", 48), ("c", 41)]
 
 
 @pytest.mark.asyncio
@@ -90,6 +126,30 @@ async def test_fill_form_resolves_credential_aliases() -> None:
     )
 
     assert locator.filled[-1] == "alice"
+
+
+@pytest.mark.asyncio
+async def test_fill_and_click_resolves_credential_aliases() -> None:
+    app, context, _, locator = register_app()
+    context.credentials["username"] = "alice"
+
+    await app.fill_and_click(
+        "page-1",
+        fields=[{"target": {"selector": "#user"}, "value": "{{cred:username}}"}],
+        click_target={"selector": "#submit"},
+    )
+
+    assert locator.filled[-1] == "alice"
+    assert locator.clicked == 1
+
+
+@pytest.mark.asyncio
+async def test_submit_form_triggers_form_submission() -> None:
+    app, _, _, locator = register_app()
+
+    await app.submit_form(page_id="page-1", target={"selector": "form.form-stack"})
+
+    assert locator.submitted == 1
 
 
 @pytest.mark.asyncio

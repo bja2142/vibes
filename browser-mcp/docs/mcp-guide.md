@@ -167,7 +167,7 @@ If you expect later evidence capture, configure it here rather than assuming you
 
 ### 2. Open A Page
 
-Use `open_page` to create and navigate a page.
+Use `open_page` to create and navigate a page. `open_page` and `navigate` both accept `timeout_ms`, which now defaults to `30000`.
 
 The result usually gives you:
 
@@ -314,6 +314,13 @@ Common actions:
 - `swipe`
 - `long_press`
 - `mouse_move`
+
+`type_text` supports two useful modes:
+
+- targeted input for standard form controls using `target` or `element_id`
+- focused-element typing when no target is provided, which is useful for consoles, terminals, and editors that already own focus
+
+For console-style surfaces, use `typing_mode="keystrokes"` so the browser emits real key events instead of using `fill()`. You can tune `keystroke_delay_ms` and `keystroke_jitter_ms` to add a base delay and random per-key variance. If you omit them, browser-puppet chooses randomized millisecond defaults per typing action.
 - `mouse_click_at`
 - `mouse_wheel`
 - `scroll`
@@ -533,6 +540,79 @@ Guidance:
 - prefer storing credentials once per context
 - refer to them by alias in actions
 - avoid emitting raw secret values in agent narration or notes
+
+## Shorthand Input Compatibility
+
+The server accepts a compatibility shorthand layer for common structured tool inputs.
+
+Supported patterns:
+
+- legacy wrapped calls using top-level `args` and `kwargs`
+- raw selector strings for `target` and `query`, such as `target="#submit"`
+- loose locator fields lifted into `target` or `query`, such as `click(page_id=..., text="Submit")`
+- `wait_for` calls that omit `state` when the intent is clear
+
+Examples:
+
+```python
+find_elements(page_id=page_id, text="Submit")
+click(page_id=page_id, target="#submit")
+click_and_wait(page_id=page_id, target="#submit", wait_for="navigation")
+wait_for(page_id=page_id, text="Saved", timeout_ms=10000)
+drag_and_drop(page_id=page_id, source_target="#src", dest_target={"text": "Drop here"})
+find_interactive_candidates(page_id=page_id, intent="submit button", text="Submit")
+fill_form(page_id=page_id, text="Username", value="alice")
+fill_and_click(page_id=page_id, text="Username", value="alice", click_target="#submit")
+submit_form(page_id=page_id, target="form.form-stack")
+run_action_and_describe(tool="click", page_id=page_id, target="#submit")
+press_key_chord(page_id=page_id, keys="Control+K")
+```
+
+Guidance:
+
+- prefer the documented full shapes in deterministic integrations
+- use the shorthand layer when working with LLM-driven or legacy MCP clients that frequently flatten structured inputs
+- if both top-level fields and nested fields are present, the nested object wins
+
+## Local Network Access
+
+By default, browser-puppet allows navigation and requests to local targets from browser contexts.
+
+Allowed by default:
+
+- `localhost`
+- loopback addresses such as `127.0.0.1`
+- private network ranges such as `10.x.x.x`, `172.16-31.x.x`, and `192.168.x.x`
+- link-local addresses
+
+To restore the older restrictive behavior for a context, set `allow_local_network: false` in the `create_context` profile.
+
+Example:
+
+```python
+create_context(
+  browser="chromium",
+  profile={
+    "allow_local_network": false,
+    "ignore_https_errors": true
+  }
+)
+```
+
+Notes:
+
+- when running in Docker, `localhost` refers to the container, not your host machine
+- for host apps, prefer the host LAN IP or explicit `set_host_overrides` mappings
+
+## Headed Browser Default
+
+Browser contexts launch headed by default.
+
+Guidance:
+
+- this server is intended to run under a valid X session so websites do not see Playwright's headless-specific behavior changes
+- in Docker and Compose, browser-puppet starts under Xvfb for that reason
+- only set `headless: true` in `create_context(profile=...)` when you explicitly want headless mode
 
 ## Browser And Capability Constraints
 

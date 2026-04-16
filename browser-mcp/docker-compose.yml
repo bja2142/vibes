@@ -12,10 +12,13 @@ services:
     volumes:
       - ${BROWSER_PUPPET_ARTIFACTS_HOST_DIR:-./artifacts}:/data/artifacts
     command:
-      - /bin/sh
-      - -c
-      - |
-        Xvfb :99 -screen 0 1280x800x24 -nolisten tcp &
-        sleep 1
-        export DISPLAY=:99
-        exec browser-puppet --log-level DEBUG --transport ${BROWSER_PUPPET_TRANSPORT:-both} --host 0.0.0.0 --port ${BROWSER_PUPPET_PORT:-8000}
+      - /app/docker/start-browser-puppet.sh
+      - browser-puppet
+      - --log-level
+      - DEBUG
+      - --transport
+      - ${BROWSER_PUPPET_TRANSPORT:-both}
+      - --host
+      - 0.0.0.0
+      - --port
+      - ${BROWSER_PUPPET_PORT:-8000}

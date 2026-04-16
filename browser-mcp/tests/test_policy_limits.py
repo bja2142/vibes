@@ -57,6 +57,7 @@ def make_context(app: BrowserPuppetApp, context_id: str = "context-1") -> tuple[
 async def test_policy_blocks_localhost_targets() -> None:
     app = BrowserPuppetApp()
     context, _ = make_context(app)
+    context.config["allow_local_network"] = False
     route = FakeRoute()
     request = SimpleNamespace(url="http://127.0.0.1/admin", headers={})
 

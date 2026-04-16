@@ -17,3 +17,10 @@ def test_get_default_transient_retry_delay_ms_respects_env(monkeypatch) -> None:
     reloaded = importlib.reload(config)
 
     assert reloaded.get_default_transient_retry_delay_ms() == 250
+
+
+def test_get_default_allow_local_network_respects_env(monkeypatch) -> None:
+    monkeypatch.setenv("BROWSER_PUPPET_ALLOW_LOCAL_NETWORK", "true")
+    reloaded = importlib.reload(config)
+
+    assert reloaded.get_default_allow_local_network() is True

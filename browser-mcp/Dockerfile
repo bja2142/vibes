@@ -44,15 +44,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml README.md /app/
 COPY src /app/src
 COPY tests /app/tests
+COPY docker /app/docker
 
 RUN pip install --upgrade pip && \
     pip install -e .[dev] && \
     python -m playwright install chromium firefox
 
 RUN mkdir -p /data/artifacts
+RUN chmod +x /app/docker/start-browser-puppet.sh
 
 VOLUME ["/data/artifacts"]
 
 EXPOSE 8000
 
-CMD ["browser-puppet", "--transport", "both", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/docker/start-browser-puppet.sh", "browser-puppet", "--transport", "both", "--host", "0.0.0.0", "--port", "8000"]

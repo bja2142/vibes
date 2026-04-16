@@ -1,0 +1,4 @@
+interface:
+  display_name: "Local Model MCP"
+  short_description: "Preset and session model relay"
+  default_prompt: "Use $local-model-mcp to call the local-model MCP for preset reviews, cross-model checks, or session handoff."

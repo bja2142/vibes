@@ -31,8 +31,8 @@ Every browser task follows this pattern:
 | Tool | Parameters | Purpose |
 |------|-----------|---------|
 | `create_context` | `browser: str`, `profile?: dict` | Create a browser context. Profile supports: `viewport`, `user_agent`, `locale`, `timezone`, `geolocation`, `mobile`, `touch`, `headers`, `device_scale_factor`, `permissions`, `allow_local_network`, `enable_coverage`, `preset`, `profile_state`, `record_har`, `record_video` |
-| `open_page` | `context_id: str`, `url: str`, `wait_until?: str = "load"` | Open a new page at a URL. Returns `page_id`, navigation status, redirect chain, and page digest |
-| `navigate` | `page_id: str`, `url: str`, `wait_until?: str = "load"` | Navigate an existing page to a new URL |
+| `open_page` | `context_id: str`, `url: str`, `wait_until?: str = "load"`, `timeout_ms?: int = 30000` | Open a new page at a URL. Returns `page_id`, navigation status, timeout, redirect chain, and page digest |
+| `navigate` | `page_id: str`, `url: str`, `wait_until?: str = "load"`, `timeout_ms?: int = 30000` | Navigate an existing page to a new URL with an explicit navigation timeout |
 | `reload_page` | `page_id: str`, `ignore_cache?: bool = false` | Reload the current page |
 | `go_back` | `page_id: str` | Navigate back in history |
 | `go_forward` | `page_id: str` | Navigate forward in history |
@@ -81,7 +81,7 @@ Many interaction tools accept `observe: str = "auto"` which controls post-action
 |------|-----------|---------|
 | `click` | `page_id?: str`, `element_id?: str`, `target?: dict`, `button?: str = "left"`, `click_count?: int = 1`, `timeout_ms?: int`, `observe?: str = "auto"` | Click an element |
 | `tap` | `page_id?: str`, `element_id?: str`, `target?: dict`, `observe?: str = "auto"` | Tap (touch) an element |
-| `type_text` | `text: str`, `page_id?: str`, `element_id?: str`, `target?: dict`, `clear_first?: bool = true`, `observe?: str = "auto"` | Type text into a focused or targeted element. Supports `{{cred:alias}}` for secrets |
+| `type_text` | `text: str`, `page_id?: str`, `element_id?: str`, `target?: dict`, `clear_first?: bool = true`, `typing_mode?: str = "auto"`, `keystroke_delay_ms?: int`, `keystroke_jitter_ms?: int`, `observe?: str = "auto"` | Type text into a targeted element or, if no target is supplied, into the currently focused element. Use `typing_mode="keystrokes"` for consoles, terminals, and editors that need real key events. If timing values are omitted, browser-puppet picks random millisecond defaults for delay and jitter. Supports `{{cred:alias}}` for secrets |
 | `press_key` | `page_id: str`, `key: str`, `observe?: str = "auto"` | Press a keyboard key (e.g., `"Enter"`, `"Tab"`, `"Escape"`) |
 | `press_key_chord` | `page_id: str`, `keys: list[str]`, `observe?: str = "auto"` | Press a key combination (e.g., `["Control", "a"]`) |
 | `hover` | `page_id?: str`, `element_id?: str`, `target?: dict` | Hover over an element |
@@ -90,6 +90,9 @@ Many interaction tools accept `observe: str = "auto"` which controls post-action
 | `set_checkbox` | `checked: bool`, `page_id?: str`, `element_id?: str`, `target?: dict`, `observe?: str = "auto"` | Set a checkbox to checked or unchecked |
 | `upload_file` | `file_path: str`, `page_id?: str`, `element_id?: str`, `target?: dict`, `observe?: str = "auto"` | Upload a file to a file input |
 | `fill_form` | `page_id: str`, `fields: list[dict]`, `form_target?: dict`, `submit?: bool = false`, `observe?: str = "auto"` | Fill multiple form fields at once. Each field is `{"target": ..., "value": ...}`. Set `submit: true` to auto-submit |
+| `fill_and_click` | `page_id: str`, `fields: list[dict]`, `click_target: dict`, `observe?: str = "auto"` | Fill one or more fields, then click a submit or continuation target |
+| `submit_form` | `page_id?: str`, `element_id?: str`, `target?: dict`, `observe?: str = "auto"` | Submit a form via `requestSubmit()` using a form element or an element inside a form |
+| `click_and_wait` | `page_id?: str`, `element_id?: str`, `target?: dict`, `wait_for?: str = "navigation"`, `wait_target?: dict` | Click a target and then wait for navigation, network idle, URL, or element state |
 | `fill_contenteditable` | `html: str`, `page_id?: str`, `element_id?: str`, `target?: dict` | Set HTML content in a contenteditable element |
 | `set_input_value` | `value: str`, `page_id?: str`, `element_id?: str`, `target?: dict` | Programmatically set an input value (no keystrokes) |
 | `select_date` | `value: str`, `page_id?: str`, `element_id?: str`, `target?: dict` | Set a date input value |
@@ -104,6 +107,24 @@ Many interaction tools accept `observe: str = "auto"` which controls post-action
 | `clipboard_read` | `page_id: str` | Read clipboard contents |
 | `clipboard_write` | `page_id: str`, `text: str` | Write to clipboard. Supports `{{cred:alias}}` |
 | `wait_for` | `target: dict`, `state: str`, `page_id?: str`, `observe?: str = "auto"` | Wait for an element to reach a state (`"visible"`, `"hidden"`, `"attached"`, `"detached"`) |
+
+Compatibility shorthand:
+
+- many tools that take `target` or `query` also accept flattened forms such as `text="Submit"` or `target="#submit"`
+- wrapped legacy payloads using top-level `args` and `kwargs` are also accepted
+- for `wait_for`, `state` is inferred when the target clearly implies an element wait or URL-pattern wait
+- `fill_form` accepts a single-field shorthand such as `text="Username", value="alice"`
+- `fill_and_click` accepts the same single-field shorthand plus `click_target="#submit"`
+- `submit_form` accepts the same target shorthand, such as `target="form.form-stack"` or `text="Save"`
+- `click_and_wait` accepts common payloads like `target={"selector": ...}, wait_for="navigation"`
+- `run_action_and_describe` accepts a flattened step such as `tool="click", target="#submit"`
+- `press_key_chord` accepts string chords such as `keys="Control+K"`
+
+Browser mode:
+
+- contexts launch headed by default
+- set `profile={"headless": true}` only when you explicitly want headless mode
+- containerized deployments are expected to provide a valid X session via Xvfb
 | `run_steps` | `page_id: str`, `steps: list[dict]`, `stop_on_failure?: bool = true`, `observe?: str = "final_only"` | Run a batch of actions sequentially |
 | `run_action_and_describe` | `action: dict`, `expect?: dict`, `mode?: str = "compact"` | Run an action and get a structured description of what changed |
 
@@ -474,7 +495,7 @@ click(element_id=<shadow_element_id>)
 When browser-puppet runs in a Docker container, `localhost` inside the container refers to the container itself, **not** the host machine. To reach an app running on the host:
 
 1. **Use the host's LAN IP** (e.g., `10.0.2.15`) instead of `localhost` or `127.0.0.1`
-2. **Enable local network access** — private/RFC1918 IPs are blocked by default
+2. **Use local network targets directly** — local and private addresses are allowed by default
 3. **Accept self-signed certs** — Chromium's `--ignore-certificate-errors` flag handles this via the `ignore_https_errors` profile option
 
 ```
@@ -485,7 +506,6 @@ When browser-puppet runs in a Docker container, `localhost` inside the container
 create_context(
   browser="chromium",
   profile={
-    "allow_local_network": true,
     "ignore_https_errors": true
   }
 )
@@ -498,10 +518,10 @@ get_page_digest(page_id=...)
 
 **Key points for local testing:**
 
-- **`allow_local_network: true`** is required to reach `10.x.x.x`, `172.16-31.x.x`, `10.x.x.x`, and loopback addresses. Without it, the server blocks these requests
+- `localhost`, loopback addresses, private network ranges such as `10.x.x.x`, `172.16-31.x.x`, and `192.168.x.x`, plus link-local targets, are allowed by default
+- Set **`allow_local_network: false`** if you want to re-enable blocking for those local targets in a specific context
 - **`ignore_https_errors: true`** tells the browser to accept self-signed, expired, or otherwise invalid TLS certificates. Essential when your local dev server uses a self-signed cert
-- **`169.254.169.254`** (cloud metadata endpoint) is always blocked regardless of settings — this is a security guardrail
-- If your app runs on HTTP (no TLS), you still need `allow_local_network` but can skip `ignore_https_errors`
+- If your app runs on HTTP (no TLS), you can skip `ignore_https_errors`
 - If using Docker Compose, you can also use the service name as the hostname if browser-puppet and your app share a Docker network
 - **`host.docker.internal`** may work on Docker Desktop (macOS/Windows) as an alias for the host, but is not available on native Linux Docker by default — prefer the actual LAN IP for reliability
 
@@ -510,7 +530,7 @@ get_page_digest(page_id=...)
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | Connection refused to `localhost:3000` | Container's localhost is not the host | Use the host LAN IP (e.g., `10.0.2.15:3000`) |
-| Request blocked / network error on `10.x.x.x` | Local network access not enabled | Add `allow_local_network: true` to profile |
+| Request blocked / network error on `10.x.x.x` | Local network access explicitly disabled | Remove `allow_local_network: false` from the profile |
 | SSL/TLS certificate error on `https://192.168.x.x` | Self-signed or dev cert | Add `ignore_https_errors: true` to profile |
 | Page loads but API calls fail with network error | App makes requests to `localhost` from JS | API base URL in the app also needs to use the LAN IP, or use `set_host_overrides` to remap |
 
@@ -522,7 +542,6 @@ If the app under test expects a real hostname (e.g., `api.myapp.local`), map it 
 create_context(
   browser="chromium",
   profile={
-    "allow_local_network": true,
     "ignore_https_errors": true
   }
 )
@@ -559,7 +578,7 @@ open_page(context_id=..., url="https://myapp.local:3000")
 - **Coverage is opt-in**: Set `enable_coverage: true` in the `create_context` profile before using `get_coverage`
 - **Video must be configured at context creation**: You cannot retroactively enable video recording
 - **HAR capture**: Must be enabled via `record_har` in the `create_context` profile
-- **Local network access**: `localhost` and private IPs are blocked by default. Set `allow_local_network: true` in the profile. When running in Docker, `localhost` means the container — use the host's LAN IP instead (see "Test a Local App" workflow above). `169.254.169.254` (cloud metadata) is always blocked
+- **Local network access**: `localhost`, private IPs, and link-local targets are allowed by default. Set `allow_local_network: false` in the profile if you need to re-enable blocking. When running in Docker, `localhost` means the container — use the host's LAN IP instead (see "Test a Local App" workflow above)
 - **Self-signed / dev TLS certs**: Set `ignore_https_errors: true` in the `create_context` profile. Without this, pages served with self-signed certs will fail to load. The custom CA bundle config is validated and tracked but not fully wired as a Playwright transport trust override, so `ignore_https_errors` is the reliable path for local dev
 - **Element identity**: `element_id` handles are best-effort stable. After major DOM changes, rediscover elements
 - **Dialogs**: Use `handle_dialog` promptly — browsers block on unhandled dialogs

@@ -1,3 +1,50 @@
-**/*.pyc
-**/__pycache__/*
+# Local agent/editor state
+.codex
+.DS_Store
+.idea/
+.vscode/
+
+# Local env files
+.env
+.env.local
+.env.*.local
+
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Test and build output
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+tmp/
+artifacts/
+
+# Local logs
+*.log
+*.stdout.log
+*.stderr.log
+mcp_logs.txt
+
+# Local reversing-mcp scratch/design files
+/reversing-mcp/.codex/
+/reversing-mcp/.gemini/
+/reversing-mcp/.tmp_feature05_mcp/
+/reversing-mcp/.tmp_mcp_live/
+/reversing-mcp/.tmp_pytest_workspace/
+/reversing-mcp/PLAN.md
+/reversing-mcp/csaw-chals/
+/reversing-mcp/pwn_design.md
+/reversing-mcp/review-prompt.md
+/reversing-mcp/runtime/
+
+# Legacy setuptools output
 **/UNKNOWN.egg-info

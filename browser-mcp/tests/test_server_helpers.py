@@ -27,3 +27,18 @@ def test_normalize_exception_preserves_semantic_shape() -> None:
     assert payload["error_code"] == "element_not_found"
     assert payload["retryable"] is True
     assert payload["target"] == {"page_id": "p1"}
+
+
+def test_normalize_exception_explains_blocked_by_client() -> None:
+    app = BrowserPuppetApp()
+    exc = RuntimeError("Page.goto: net::ERR_BLOCKED_BY_CLIENT at http://10.0.2.2:8081/labs/hlf/")
+
+    payload = app.normalize_exception(exc)
+
+    assert payload["error_code"] == "request_blocked"
+    assert "browser-puppet" in payload["message"]
+    assert payload["target"] == {
+        "url": "http://10.0.2.2:8081/labs/hlf/",
+        "hostname": "10.0.2.2",
+    }
+    assert any("allow_local_network" in step for step in payload["next_steps"])

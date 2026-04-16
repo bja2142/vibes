@@ -4,10 +4,13 @@ import argparse
 import asyncio
 import base64
 from contextlib import AsyncExitStack, asynccontextmanager
+import functools
 import fnmatch
+import inspect
 import ipaddress
 import json
 import logging
+import mcp.types as mcp_types
 import os
 import random
 import re
@@ -15,13 +18,18 @@ import sys
 import time
 import traceback
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse, urlunparse
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.models import InitializationOptions
+from mcp.server.session import InitializationState, ServerSession
+from pydantic import ConfigDict, model_validator
 from playwright.async_api import Browser, BrowserContext, ElementHandle, Frame, Locator, Page, async_playwright
 
 from .config import (
+    DEFAULT_ALLOW_LOCAL_NETWORK,
+    DEFAULT_NAVIGATION_TIMEOUT_MS,
     DEFAULT_SSE_HOST,
     DEFAULT_SSE_PORT,
     DEFAULT_TEXT_TRANSFER_MAX_BYTES,
@@ -37,6 +45,7 @@ from .utils import compute_totp, ensure_dir, new_id, origin_from_url, safe_json,
 
 TRACE_LEVEL = 5
 logging.addLevelName(TRACE_LEVEL, "TRACE")
+BLOCKED_BY_CLIENT_URL_RE = re.compile(r"ERR_BLOCKED_BY_CLIENT at (?P<url>\S+)")
 
 
 def _trace(self: logging.Logger, message: str, *args: Any, **kwargs: Any) -> None:
@@ -49,6 +58,7 @@ LOGGER = logging.getLogger("browser_puppet")
 TRANSIENT_INTERNAL_ERROR_PATTERNS = (
     re.compile(r"function takes exactly \d+ arguments \(\d+ given\)"),
 )
+_ORIGINAL_SERVER_SESSION_RECEIVED_REQUEST = ServerSession._received_request
 
 
 def tool_result(payload: dict[str, Any]) -> dict[str, Any]:
@@ -106,6 +116,395 @@ def unwrap_mcp_tool_call(args: tuple[Any, ...], kwargs: dict[str, Any]) -> tuple
     return tuple(raw_args), raw_kwargs
 
 
+TARGET_QUERY_KEYS = (
+    "selector",
+    "role",
+    "label",
+    "placeholder",
+    "text",
+    "xpath",
+    "css",
+    "exact",
+    "visible",
+    "scope",
+    "limit",
+)
+TARGET_QUERY_KEYS_WITHOUT_TEXT = tuple(key for key in TARGET_QUERY_KEYS if key != "text")
+WAIT_FOR_TARGET_KEYS = TARGET_QUERY_KEYS + ("pattern", "timeout_ms")
+TARGET_COMPAT_TOOLS = (
+    "click",
+    "tap",
+    "hover",
+    "select_dropdown",
+    "set_checkbox",
+    "upload_file",
+    "long_press",
+    "fill_contenteditable",
+    "select_date",
+    "set_input_value",
+    "scroll_element",
+    "submit_form",
+)
+FILL_FORM_FIELD_KEYS = TARGET_QUERY_KEYS + ("value", "action", "checked")
+
+
+def normalize_string_query_payload(value: Any, *, field_name: str, string_key: str = "selector") -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, str):
+        return {string_key: value}
+    if not isinstance(value, dict):
+        raise TypeError(f"{field_name} must decode to an object.")
+    return dict(value)
+
+
+def lift_fields_into_nested_payload(
+    payload: dict[str, Any],
+    *,
+    field_name: str,
+    candidate_keys: tuple[str, ...],
+    string_key: str = "selector",
+    hoist_keys: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    normalized = dict(payload)
+    nested = normalize_string_query_payload(normalized.get(field_name), field_name=field_name, string_key=string_key)
+
+    for hoist_key in hoist_keys:
+        if hoist_key not in normalized and hoist_key in nested:
+            normalized[hoist_key] = nested.pop(hoist_key)
+
+    for key in candidate_keys:
+        if key in normalized and key not in nested:
+            nested[key] = normalized.pop(key)
+
+    if nested:
+        normalized[field_name] = nested
+
+    return normalized
+
+
+def build_nested_payload_normalizer(
+    *,
+    field_name: str,
+    candidate_keys: tuple[str, ...],
+    string_key: str = "selector",
+    hoist_keys: tuple[str, ...] = (),
+    defaults_factory: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    def normalize(payload: dict[str, Any]) -> dict[str, Any]:
+        normalized = lift_fields_into_nested_payload(
+            payload,
+            field_name=field_name,
+            candidate_keys=candidate_keys,
+            string_key=string_key,
+            hoist_keys=hoist_keys,
+        )
+        if defaults_factory is not None:
+            normalized = defaults_factory(normalized)
+        return normalized
+
+    return normalize
+
+
+def normalize_find_interactive_candidates_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return lift_fields_into_nested_payload(
+        payload,
+        field_name="filters",
+        candidate_keys=TARGET_QUERY_KEYS,
+    )
+
+
+def normalize_press_key_chord_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    keys = normalized.get("keys")
+    if isinstance(keys, str):
+        normalized["keys"] = [part.strip() for part in keys.split("+") if part.strip()]
+    return normalized
+
+
+def normalize_fill_form_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    fields = normalized.get("fields")
+
+    def normalize_form_target_fields(current: dict[str, Any]) -> dict[str, Any]:
+        if "form_target" in current:
+            current = lift_fields_into_nested_payload(
+                current,
+                field_name="form_target",
+                candidate_keys=TARGET_QUERY_KEYS,
+            )
+        return current
+
+    if isinstance(fields, dict):
+        fields = [fields]
+    if isinstance(fields, list):
+        normalized_fields = []
+        for field in fields:
+            if not isinstance(field, dict):
+                raise TypeError("fill_form fields must decode to objects.")
+            item = dict(field)
+            item = lift_fields_into_nested_payload(
+                item,
+                field_name="target",
+                candidate_keys=TARGET_QUERY_KEYS,
+            )
+            if "checked" in item and "value" not in item:
+                item["value"] = item.pop("checked")
+                item.setdefault("action", "check")
+            normalized_fields.append(item)
+        normalized["fields"] = normalized_fields
+        return normalize_form_target_fields(normalized)
+
+    loose_field = {
+        key: normalized.pop(key)
+        for key in tuple(normalized.keys())
+        if key in FILL_FORM_FIELD_KEYS
+    }
+    if loose_field:
+        loose_field = lift_fields_into_nested_payload(
+            loose_field,
+            field_name="target",
+            candidate_keys=TARGET_QUERY_KEYS,
+        )
+        if "checked" in loose_field and "value" not in loose_field:
+            loose_field["value"] = loose_field.pop("checked")
+            loose_field.setdefault("action", "check")
+        normalized["fields"] = [loose_field]
+
+    return normalize_form_target_fields(normalized)
+
+
+def normalize_fill_and_click_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = normalize_fill_form_payload(payload)
+    return lift_fields_into_nested_payload(
+        normalized,
+        field_name="click_target",
+        candidate_keys=TARGET_QUERY_KEYS,
+    )
+
+
+def normalize_click_and_wait_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = lift_fields_into_nested_payload(
+        payload,
+        field_name="target",
+        candidate_keys=TARGET_QUERY_KEYS,
+        hoist_keys=("page_id",),
+    )
+    return lift_fields_into_nested_payload(
+        normalized,
+        field_name="wait_target",
+        candidate_keys=WAIT_FOR_TARGET_KEYS,
+    )
+
+
+def normalize_step_payload(payload: dict[str, Any], *, step_field: str, reserved_keys: tuple[str, ...]) -> dict[str, Any]:
+    normalized = dict(payload)
+    step = normalized.get(step_field)
+
+    if step is None and "tool" in normalized:
+        step = {key: normalized.pop(key) for key in tuple(normalized.keys()) if key not in reserved_keys}
+    elif isinstance(step, str):
+        step = {"tool": step}
+    elif isinstance(step, dict):
+        step = dict(step)
+    elif step is not None:
+        raise TypeError(f"{step_field} must decode to an object.")
+
+    if not step:
+        return normalized
+
+    tool_name = step.get("tool")
+    if isinstance(tool_name, str):
+        step = normalize_mcp_tool_payload(step, tool_name, ())
+    normalized[step_field] = step
+    return normalized
+
+
+def normalize_run_action_and_describe_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return normalize_step_payload(payload, step_field="action", reserved_keys=("expect", "mode", "action"))
+
+
+def normalize_mcp_tool_payload(payload: Any, fn_name: str, param_names: tuple[str, ...]) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+
+    normalized = dict(payload)
+    if "args" in normalized or "kwargs" in normalized:
+        raw_args = normalized.pop("args", [])
+        raw_kwargs = normalized.pop("kwargs", {})
+        call_args, call_kwargs = unwrap_mcp_tool_call((), {"args": raw_args, "kwargs": raw_kwargs})
+        compat_payload = dict(call_kwargs)
+        for index, value in enumerate(call_args):
+            if index >= len(param_names):
+                break
+            compat_payload.setdefault(param_names[index], value)
+        compat_payload.update(normalized)
+        normalized = compat_payload
+
+    for normalizer in TOOL_PAYLOAD_NORMALIZERS.get(fn_name, ()):
+        normalized = normalizer(normalized)
+
+    return normalized
+
+
+def normalize_create_context_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    extra_profile_keys = [key for key in normalized if key not in {"browser", "profile"}]
+
+    if extra_profile_keys:
+        profile = normalized.get("profile")
+        if profile is None:
+            profile = {}
+        elif not isinstance(profile, dict):
+            raise TypeError("create_context profile must decode to an object.")
+        else:
+            profile = dict(profile)
+        for key in extra_profile_keys:
+            profile[key] = normalized.pop(key)
+        normalized["profile"] = profile
+
+    if "browser" not in normalized:
+        normalized["browser"] = "chromium"
+
+    return normalized
+
+
+def normalize_wait_for_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = lift_fields_into_nested_payload(
+        payload,
+        field_name="target",
+        candidate_keys=WAIT_FOR_TARGET_KEYS,
+        hoist_keys=("page_id",),
+    )
+    target = normalize_string_query_payload(normalized.get("target"), field_name="wait_for target")
+
+    if "state" not in normalized:
+        if "pattern" in target:
+            normalized["state"] = "url"
+        elif target:
+            normalized["state"] = "visible"
+
+    return normalized
+
+
+TOOL_PAYLOAD_NORMALIZERS: dict[str, tuple[Callable[[dict[str, Any]], dict[str, Any]], ...]] = {
+    "create_context": (normalize_create_context_payload,),
+    "find_elements": (
+        build_nested_payload_normalizer(
+            field_name="query",
+            candidate_keys=TARGET_QUERY_KEYS,
+        ),
+    ),
+    "find_interactive_candidates": (normalize_find_interactive_candidates_payload,),
+    "fill_form": (normalize_fill_form_payload,),
+    "fill_and_click": (normalize_fill_and_click_payload,),
+    "click_and_wait": (normalize_click_and_wait_payload,),
+    "press_key_chord": (normalize_press_key_chord_payload,),
+    "type_text": (
+        build_nested_payload_normalizer(
+            field_name="target",
+            candidate_keys=TARGET_QUERY_KEYS_WITHOUT_TEXT,
+            hoist_keys=("page_id",),
+        ),
+    ),
+    "run_action_and_describe": (normalize_run_action_and_describe_payload,),
+    "wait_for": (normalize_wait_for_payload,),
+    "drag_and_drop": (
+        build_nested_payload_normalizer(
+            field_name="source_target",
+            candidate_keys=TARGET_QUERY_KEYS,
+        ),
+        build_nested_payload_normalizer(
+            field_name="dest_target",
+            candidate_keys=TARGET_QUERY_KEYS,
+        ),
+    ),
+}
+for _tool_name in TARGET_COMPAT_TOOLS:
+    TOOL_PAYLOAD_NORMALIZERS[_tool_name] = (
+        build_nested_payload_normalizer(
+            field_name="target",
+            candidate_keys=WAIT_FOR_TARGET_KEYS,
+            hoist_keys=("page_id",),
+        ),
+    )
+
+
+def build_compat_arg_model(base_model: type[Any], fn_name: str, param_names: tuple[str, ...]) -> type[Any]:
+    class CompatArgModel(base_model):  # type: ignore[misc, valid-type]
+        args: list[Any] | None = None
+        kwargs: dict[str, Any] | None = None
+
+        model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
+
+        @model_validator(mode="before")
+        @classmethod
+        def _normalize_payload(cls, payload: Any) -> Any:
+            return normalize_mcp_tool_payload(payload, fn_name, param_names)
+
+        def model_dump_one_level(self) -> dict[str, Any]:
+            payload = super().model_dump_one_level()
+            payload.pop("args", None)
+            payload.pop("kwargs", None)
+            return payload
+
+    CompatArgModel.__name__ = f"{fn_name}CompatArguments"
+    CompatArgModel.model_rebuild(force=True)
+    return CompatArgModel
+
+
+async def _compat_server_session_received_request(
+    self: ServerSession, responder: Any
+) -> None:
+    request = responder.request.root
+    match request:
+        case mcp_types.InitializeRequest(params=params):
+            requested_version = params.protocolVersion
+            self._initialization_state = InitializationState.Initializing
+            self._client_params = params
+            with responder:
+                await responder.respond(
+                    mcp_types.ServerResult(
+                        mcp_types.InitializeResult(
+                            protocolVersion=requested_version,
+                            capabilities=self._init_options.capabilities,
+                            serverInfo=mcp_types.Implementation(
+                                name=self._init_options.server_name,
+                                version=self._init_options.server_version,
+                                websiteUrl=self._init_options.website_url,
+                                icons=self._init_options.icons,
+                            ),
+                            instructions=self._init_options.instructions,
+                        )
+                    )
+                )
+            self._initialization_state = InitializationState.Initialized
+        case mcp_types.PingRequest():
+            return
+        case _:
+            if self._initialization_state != InitializationState.Initialized:
+                LOGGER.warning(
+                    "compat_auto_initialize request_type=%s",
+                    type(request).__name__,
+                )
+                self._initialization_state = InitializationState.Initialized
+                if getattr(self, "_init_options", None) is None:
+                    self._init_options = InitializationOptions(
+                        server_name="browser-puppet",
+                        server_version="compat",
+                        capabilities={},
+                    )
+
+
+def enable_legacy_initialization_compatibility() -> None:
+    if ServerSession._received_request is _compat_server_session_received_request:
+        return
+    ServerSession._received_request = _compat_server_session_received_request
+
+
+enable_legacy_initialization_compatibility()
+
+
 class BrowserPuppetApp:
     def __init__(self) -> None:
         self.state = ServerState(artifacts_root=ensure_dir(get_default_artifact_dir()))
@@ -113,6 +512,7 @@ class BrowserPuppetApp:
         self.max_pages_per_context = 20
         self.idle_timeout_seconds = 900
         self.transient_retry_delay_ms = DEFAULT_TRANSIENT_RETRY_DELAY_MS
+        self.allow_local_network_by_default = DEFAULT_ALLOW_LOCAL_NETWORK
 
     async def start(self) -> None:
         if self.state.playwright is None:
@@ -125,20 +525,25 @@ class BrowserPuppetApp:
             await self.state.playwright.stop()
             self.state.playwright = None
 
-    async def ensure_browser(self, browser_name: str) -> Browser:
+    @staticmethod
+    def _browser_pool_key(browser_name: str, headless: bool) -> tuple[str, bool]:
+        return browser_name, headless
+
+    async def ensure_browser(self, browser_name: str, *, headless: bool = False) -> Browser:
         await self.start()
-        browser = self.state.browser_pool.get(browser_name)
+        pool_key = self._browser_pool_key(browser_name, headless)
+        browser = self.state.browser_pool.get(pool_key)
         if browser is not None:
             return browser
         assert self.state.playwright is not None
         browser_type = getattr(self.state.playwright, browser_name)
-        launch_kwargs: dict[str, Any] = {"headless": False}
+        launch_kwargs: dict[str, Any] = {"headless": headless}
         if browser_name == "chromium":
             launch_kwargs["args"] = [
                 "--disable-blink-features=AutomationControlled",
             ]
         browser = await browser_type.launch(**launch_kwargs)
-        self.state.browser_pool[browser_name] = browser
+        self.state.browser_pool[pool_key] = browser
         return browser
 
     def get_context(self, context_id: str) -> ContextState:
@@ -546,21 +951,28 @@ class BrowserPuppetApp:
         allowlist = set(context.config.get("network_allowlist", []))
         if hostname in allowlist:
             return None
+        allow_local_network = bool(context.config.get("allow_local_network", True))
         lowered = hostname.lower()
         if lowered in {"localhost", "::1"}:
+            if allow_local_network:
+                return None
             return "localhost access is blocked by default policy"
         try:
             ip = ipaddress.ip_address(hostname)
         except ValueError:
             return None
         if ip.is_loopback:
+            if allow_local_network:
+                return None
             return "loopback access is blocked by default policy"
         if ip.is_private:
+            if allow_local_network:
+                return None
             return "RFC1918/private network access is blocked by default policy"
         if ip.is_link_local:
+            if allow_local_network:
+                return None
             return "link-local access is blocked by default policy"
-        if str(ip) == "169.254.169.254":
-            return "cloud metadata access is blocked by default policy"
         return None
 
     async def _ensure_cdp_session(self, page_state: PageState) -> Any:
@@ -1192,7 +1604,8 @@ class BrowserPuppetApp:
         return safe_json(payload)
 
     async def create_context(self, browser: str, profile: dict[str, Any] | None = None) -> dict[str, Any]:
-        profile = self._merge_profile_preset(browser, profile or {})
+        profile = dict(self._merge_profile_preset(browser, profile or {}))
+        profile.setdefault("allow_local_network", self.allow_local_network_by_default)
         self._check_context_limit()
         ca_bundle = profile.get("ca_bundle_path")
         if ca_bundle is not None and not Path(ca_bundle).exists():
@@ -1201,7 +1614,7 @@ class BrowserPuppetApp:
                 f"CA bundle path '{ca_bundle}' does not exist.",
                 target={"ca_bundle_path": ca_bundle},
             )
-        browser_instance = await self.ensure_browser(browser)
+        browser_instance = await self.ensure_browser(browser, headless=bool(profile.get("headless", False)))
         context_id = new_id("context")
         artifact_dir = ensure_dir(self.state.artifacts_root / context_id)
         context_kwargs = self._build_context_kwargs(artifact_dir, profile, browser)
@@ -1250,12 +1663,18 @@ class BrowserPuppetApp:
 
     def _default_user_agent(self, browser_name: str) -> str:
         version = "134.0.0.0"
-        browser = self.state.browser_pool.get(browser_name)
-        if browser is not None:
+        for pool_key, browser in self.state.browser_pool.items():
+            if isinstance(pool_key, tuple):
+                pool_browser_name = pool_key[0]
+            else:
+                pool_browser_name = pool_key
+            if pool_browser_name != browser_name:
+                continue
             try:
                 raw = browser.version
                 if raw:
                     version = raw
+                    break
             except Exception:
                 pass
         platform = "Windows NT 10.0; Win64; x64"
@@ -1328,12 +1747,12 @@ class BrowserPuppetApp:
         context = self.get_context(context_id)
         return tool_result({"aliases": sorted(context.credentials.keys())})
 
-    async def open_page(self, context_id: str, url: str, wait_until: str = "load") -> dict[str, Any]:
+    async def open_page(self, context_id: str, url: str, wait_until: str = "load", timeout_ms: int = DEFAULT_NAVIGATION_TIMEOUT_MS) -> dict[str, Any]:
         context = self.get_context(context_id)
         self._check_page_limit(context)
         page = await context.playwright_context.new_page()
         page_state = await self.register_page(context, page)
-        response = await page.goto(url, wait_until=wait_until)
+        response = await page.goto(url, wait_until=wait_until, timeout=timeout_ms)
         redirect_chain = self._build_redirect_chain(page_state, page.url)
         await self.capture_page_meta(page_state)
         return tool_result(
@@ -1341,16 +1760,22 @@ class BrowserPuppetApp:
                 "page_id": page_state.page_id,
                 "url": page.url,
                 "status": response.status if response else None,
+                "timeout_ms": timeout_ms,
                 "redirect_chain": redirect_chain,
                 "digest": await self.get_page_digest(page_state.page_id, mode=self.state.defaults.mode),
             }
         )
 
-    async def navigate(self, page_id: str, url: str, wait_until: str = "load") -> dict[str, Any]:
+    async def navigate(self, page_id: str, url: str, wait_until: str = "load", timeout_ms: int = DEFAULT_NAVIGATION_TIMEOUT_MS) -> dict[str, Any]:
         page_state = self.get_page_state(page_id)
         before = await self.get_lightweight_checkpoint(page_state)
-        response = await page_state.playwright_page.goto(url, wait_until=wait_until)
-        return await self.action_outcome(page_state, "navigate", before, extra={"status": response.status if response else None})
+        response = await page_state.playwright_page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+        return await self.action_outcome(
+            page_state,
+            "navigate",
+            before,
+            extra={"status": response.status if response else None, "timeout_ms": timeout_ms},
+        )
 
     async def reload_page(self, page_id: str, ignore_cache: bool = False) -> dict[str, Any]:
         page_state = self.get_page_state(page_id)
@@ -1692,13 +2117,14 @@ class BrowserPuppetApp:
 
     async def find_elements(self, page_id: str, query: dict[str, Any]) -> dict[str, Any]:
         page_state = self.get_page_state(page_id)
-        locator = self._locator_from_target(page_state, query)
+        normalized_query = self._normalize_target_query(query)
+        locator = self._locator_from_target(page_state, normalized_query)
         count = await locator.count()
         descriptors = []
-        limit = min(count, query.get("limit", self.state.defaults.max_list_length))
+        limit = min(count, normalized_query.get("limit", self.state.defaults.max_list_length))
         for index in range(limit):
             item = locator.nth(index)
-            descriptors.append(await self.describe_locator(page_state, item, query=query, nth=index))
+            descriptors.append(await self.describe_locator(page_state, item, query=normalized_query, nth=index))
         return tool_result({"matches": descriptors, "remaining_count": max(0, count - limit)})
 
     async def find_interactive_candidates(self, page_id: str, intent: str, filters: dict[str, Any] | None = None, limit: int = 10) -> dict[str, Any]:
@@ -1849,7 +2275,13 @@ class BrowserPuppetApp:
             next_steps=["find_elements"],
         )
 
-    def _locator_from_target(self, page_state: PageState, target: dict[str, Any]) -> Locator:
+    def _normalize_target_query(self, target: dict[str, Any] | str) -> dict[str, Any]:
+        if isinstance(target, str):
+            return {"selector": target}
+        return target
+
+    def _locator_from_target(self, page_state: PageState, target: dict[str, Any] | str) -> Locator:
+        target = self._normalize_target_query(target)
         page = page_state.playwright_page
         if target.get("selector"):
             return page.locator(target["selector"])
@@ -2509,15 +2941,85 @@ class BrowserPuppetApp:
         element_id: str | None = None,
         target: dict[str, Any] | None = None,
         clear_first: bool = True,
+        typing_mode: str = "auto",
+        keystroke_delay_ms: int | None = None,
+        keystroke_jitter_ms: int | None = None,
         observe: str = "auto",
     ) -> dict[str, Any]:
-        page_state, locator = await self.resolve_locator(page_id=page_id, element_id=element_id, target=target)
-        before = await self.before_mutation(page_state, observe)
+        if page_id is None and element_id is None:
+            raise SemanticError("missing_target", "type_text requires page_id when element_id is absent.")
+        page_state = self.get_page_state(page_id) if page_id is not None else (await self.get_element_record(element_id))[0]
         resolved_text = self._resolve_input_text(page_state, text)
-        if clear_first:
-            await locator.fill("")
-        await locator.fill(resolved_text)
+        use_keystrokes = (
+            typing_mode == "keystrokes"
+            or (
+                typing_mode == "auto"
+                and (
+                    not clear_first
+                    or element_id is None and target is None
+                    or (keystroke_delay_ms is not None and keystroke_delay_ms > 0)
+                    or (keystroke_jitter_ms is not None and keystroke_jitter_ms > 0)
+                )
+            )
+        )
+        before = await self.before_mutation(page_state, observe)
+        locator = None
+        if element_id is not None or target is not None:
+            _, locator = await self.resolve_locator(page_id=page_id, element_id=element_id, target=target)
+        if use_keystrokes:
+            await self._type_text_via_keystrokes(
+                page_state,
+                resolved_text,
+                locator=locator,
+                clear_first=clear_first,
+                keystroke_delay_ms=keystroke_delay_ms,
+                keystroke_jitter_ms=keystroke_jitter_ms,
+            )
+        else:
+            if locator is None:
+                raise SemanticError(
+                    "missing_target",
+                    "type_text with fill mode requires element_id or target. Use typing_mode='keystrokes' to type into the focused element.",
+                    target={"page_id": page_state.page_id},
+                )
+            if clear_first:
+                await locator.fill("")
+            await locator.fill(resolved_text)
         return await self.action_outcome(page_state, "type_text", before)
+
+    async def _type_text_via_keystrokes(
+        self,
+        page_state: PageState,
+        text: str,
+        *,
+        locator: Locator | None = None,
+        clear_first: bool,
+        keystroke_delay_ms: int | None,
+        keystroke_jitter_ms: int | None,
+    ) -> None:
+        page = page_state.playwright_page
+        if locator is not None:
+            await locator.focus()
+            if clear_first:
+                try:
+                    await locator.fill("")
+                except Exception:
+                    await page.keyboard.press("Control+A")
+                    await page.keyboard.press("Backspace")
+        elif clear_first:
+            await page.keyboard.press("Control+A")
+            await page.keyboard.press("Backspace")
+
+        base_delay = random.randint(24, 62) if keystroke_delay_ms is None else max(0, keystroke_delay_ms)
+        jitter = random.randint(8, max(8, min(28, base_delay // 2 or 8))) if keystroke_jitter_ms is None else max(0, keystroke_jitter_ms)
+        if base_delay == 0 and jitter == 0:
+            await page.keyboard.type(text)
+            return
+        for char in text:
+            delay = base_delay
+            if jitter:
+                delay = max(0, delay + random.randint(-jitter, jitter))
+            await page.keyboard.type(char, delay=delay)
 
     async def press_key(self, page_id: str, key: str, observe: str = "auto") -> dict[str, Any]:
         page_state = self.get_page_state(page_id)
@@ -2705,6 +3207,41 @@ class BrowserPuppetApp:
         )
         return tool_result({"success": True})
 
+    async def submit_form(
+        self,
+        page_id: str | None = None,
+        element_id: str | None = None,
+        target: dict[str, Any] | None = None,
+        observe: str = "auto",
+    ) -> dict[str, Any]:
+        page_state, locator = await self.resolve_locator(page_id=page_id, element_id=element_id, target=target)
+        before = await self.before_mutation(page_state, observe)
+        submitted = await locator.evaluate(
+            """
+            (node) => {
+              const form = node.tagName?.toLowerCase() === 'form' ? node : node.closest('form');
+              if (!form) {
+                return {submitted: false, reason: 'no_form'};
+              }
+              if (typeof form.requestSubmit === 'function') {
+                form.requestSubmit();
+              } else {
+                form.submit();
+              }
+              return {submitted: true};
+            }
+            """
+        )
+        if not submitted.get("submitted"):
+            raise SemanticError(
+                "form_not_found",
+                "submit_form target is not a form and is not inside a form.",
+                target={"page_id": page_state.page_id, "target": target, "element_id": element_id},
+                retryable=True,
+                next_steps=["find_elements"],
+            )
+        return await self.action_outcome(page_state, "submit_form", before)
+
     async def fill_form(
         self,
         page_id: str,
@@ -2740,6 +3277,89 @@ class BrowserPuppetApp:
                 await page_state.playwright_page.keyboard.press("Enter")
         outcome = await self.action_outcome(page_state, "fill_form", before)
         outcome["field_results"] = results
+        return outcome
+
+    async def fill_and_click(
+        self,
+        page_id: str,
+        fields: list[dict[str, Any]],
+        click_target: dict[str, Any],
+        observe: str = "auto",
+    ) -> dict[str, Any]:
+        page_state = self.get_page_state(page_id)
+        before = await self.before_mutation(page_state, observe)
+        results = []
+        for field in fields:
+            field_target = field["target"]
+            action = field.get("action", "fill")
+            _, locator = await self.resolve_locator(page_id=page_id, target=field_target)
+            value = field.get("value")
+            resolved_value = self._resolve_input_text(page_state, str(value)) if isinstance(value, str) else value
+            if action == "select":
+                await locator.select_option(value=resolved_value)
+            elif action == "check":
+                if resolved_value:
+                    await locator.check()
+                else:
+                    await locator.uncheck()
+            else:
+                await locator.fill(str(resolved_value))
+            results.append({"target": field_target, "success": True})
+        _, click_locator = await self.resolve_locator(page_id=page_id, target=click_target, source_name="click_target")
+        await click_locator.click(timeout=DEFAULT_TIMEOUT_MS)
+        outcome = await self.action_outcome(page_state, "fill_and_click", before)
+        outcome["field_results"] = results
+        outcome["click_target"] = click_target
+        return outcome
+
+    async def click_and_wait(
+        self,
+        page_id: str | None = None,
+        element_id: str | None = None,
+        target: dict[str, Any] | None = None,
+        button: str = "left",
+        click_count: int = 1,
+        timeout_ms: int = DEFAULT_TIMEOUT_MS,
+        wait_for: str = "navigation",
+        wait_target: dict[str, Any] | None = None,
+        observe: str = "auto",
+    ) -> dict[str, Any]:
+        page_state, locator = await self.resolve_locator(page_id=page_id, element_id=element_id, target=target)
+        before = await self.before_mutation(page_state, observe)
+        await locator.click(button=button, click_count=click_count, timeout=timeout_ms)
+
+        if wait_for == "navigation":
+            await page_state.playwright_page.wait_for_load_state("load", timeout=timeout_ms)
+        elif wait_for == "networkidle":
+            await page_state.playwright_page.wait_for_load_state("networkidle", timeout=timeout_ms)
+        elif wait_for == "url":
+            if not wait_target or "pattern" not in wait_target:
+                raise SemanticError(
+                    "missing_target",
+                    "click_and_wait with wait_for='url' requires wait_target.pattern.",
+                    target={"wait_for": wait_for},
+                )
+            await page_state.playwright_page.wait_for_url(wait_target["pattern"], timeout=wait_target.get("timeout_ms", timeout_ms))
+        elif wait_for in {"element", "hidden"}:
+            if not wait_target:
+                raise SemanticError(
+                    "missing_target",
+                    f"click_and_wait with wait_for='{wait_for}' requires wait_target.",
+                    target={"wait_for": wait_for},
+                )
+            _, wait_locator = await self.resolve_locator(page_id=page_state.page_id, target=wait_target, source_name="wait_target")
+            await wait_locator.wait_for(state="hidden" if wait_for == "hidden" else "visible", timeout=wait_target.get("timeout_ms", timeout_ms))
+        else:
+            raise SemanticError(
+                "unsupported_wait",
+                f"Unsupported click_and_wait wait_for '{wait_for}'.",
+                target={"wait_for": wait_for},
+            )
+
+        outcome = await self.action_outcome(page_state, "click_and_wait", before)
+        outcome["wait_for"] = wait_for
+        if wait_target:
+            outcome["wait_target"] = wait_target
         return outcome
 
     async def wait_for(self, target: dict[str, Any], state: str, page_id: str | None = None, observe: str = "auto") -> dict[str, Any]:
@@ -4090,9 +4710,44 @@ class BrowserPuppetApp:
     def normalize_exception(self, exc: Exception) -> dict[str, Any]:
         if isinstance(exc, SemanticError):
             return exc.to_dict()
+        message = str(exc)
+        if "ERR_BLOCKED_BY_CLIENT" in message:
+            blocked_url = None
+            hostname = None
+            match = BLOCKED_BY_CLIENT_URL_RE.search(message)
+            if match:
+                blocked_url = match.group("url")
+                try:
+                    hostname = urlparse(blocked_url).hostname
+                except Exception:
+                    hostname = None
+            likely_causes = [
+                "browser-puppet route policy aborted the request with blockedbyclient",
+                "the target URL matched a blocked route pattern",
+                "the context disabled local-network access with allow_local_network=false",
+            ]
+            next_steps = [
+                "check create_context profile.allow_local_network",
+                "check block_routes or mocked route configuration on the context",
+                "check whether the client is connected to the latest rebuilt MCP container",
+            ]
+            if hostname:
+                likely_causes.insert(1, f"the target host '{hostname}' was treated as blocked by browser-puppet policy")
+            return {
+                "error_code": "request_blocked",
+                "message": (
+                    "Request was blocked by browser-puppet before it reached the network. "
+                    "This ERR_BLOCKED_BY_CLIENT result usually comes from browser-puppet route.abort('blockedbyclient'), "
+                    "not Chromium Private Network Access."
+                ),
+                "retryable": False,
+                "target": {"url": blocked_url, "hostname": hostname},
+                "likely_causes": likely_causes,
+                "next_steps": next_steps,
+            }
         return {
             "error_code": "tool_failure",
-            "message": str(exc),
+            "message": message,
             "retryable": False,
             "likely_causes": [],
             "next_steps": [],
@@ -4111,6 +4766,10 @@ mcp = FastMCP("browser-puppet")
 
 def expose(fn_name: str):
     def decorator(func):
+        tool_signature = inspect.signature(func)
+        param_names = tuple(tool_signature.parameters.keys())
+
+        @functools.wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> dict[str, Any]:
             started_at = time.perf_counter()
             call_args, call_kwargs = unwrap_mcp_tool_call(args, kwargs)
@@ -4163,7 +4822,14 @@ def expose(fn_name: str):
                     return APP.normalize_exception(exc)  # type: ignore[return-value]
 
         wrapper.__name__ = fn_name
-        return mcp.tool(name=fn_name)(wrapper)
+        wrapper.__signature__ = tool_signature
+        mcp.tool(name=fn_name)(wrapper)
+        tool = mcp._tool_manager.get_tool(fn_name)
+        if tool is not None:
+            compat_model = build_compat_arg_model(tool.fn_metadata.arg_model, fn_name, param_names)
+            tool.fn_metadata.arg_model = compat_model
+            tool.parameters = compat_model.model_json_schema(by_alias=True)
+        return wrapper
 
     return decorator
 
@@ -4236,13 +4902,13 @@ async def _create_context(browser: str, profile: dict[str, Any] | None = None) -
 
 
 @expose("open_page")
-async def _open_page(context_id: str, url: str, wait_until: str = "load") -> dict[str, Any]:
-    return await APP.open_page(context_id, url, wait_until)
+async def _open_page(context_id: str, url: str, wait_until: str = "load", timeout_ms: int = DEFAULT_NAVIGATION_TIMEOUT_MS) -> dict[str, Any]:
+    return await APP.open_page(context_id, url, wait_until, timeout_ms)
 
 
 @expose("navigate")
-async def _navigate(page_id: str, url: str, wait_until: str = "load") -> dict[str, Any]:
-    return await APP.navigate(page_id, url, wait_until)
+async def _navigate(page_id: str, url: str, wait_until: str = "load", timeout_ms: int = DEFAULT_NAVIGATION_TIMEOUT_MS) -> dict[str, Any]:
+    return await APP.navigate(page_id, url, wait_until, timeout_ms)
 
 
 @expose("reload_page")
@@ -4604,9 +5270,18 @@ async def _type_text(
     element_id: str | None = None,
     target: dict[str, Any] | None = None,
     clear_first: bool = True,
+    typing_mode: str = "auto",
+    keystroke_delay_ms: int | None = None,
+    keystroke_jitter_ms: int | None = None,
     observe: str = "auto",
 ) -> dict[str, Any]:
-    return await APP.type_text(text, page_id, element_id, target, clear_first, observe)
+    """Type text into a targeted element or, if no target is provided, into the currently focused element.
+
+    Use typing_mode="keystrokes" for consoles, terminals, or editors that need real key events instead of fill().
+    keystroke_delay_ms sets the base delay between keystrokes and keystroke_jitter_ms adds random per-key variance.
+    If you omit those timing values, browser-puppet chooses random millisecond defaults for a more natural typing cadence.
+    """
+    return await APP.type_text(text, page_id, element_id, target, clear_first, typing_mode, keystroke_delay_ms, keystroke_jitter_ms, observe)
 
 
 @expose("press_key")
@@ -4716,6 +5391,16 @@ async def _scroll_element(
     return await APP.scroll_element(direction, amount_px, page_id, element_id, target)
 
 
+@expose("submit_form")
+async def _submit_form(
+    page_id: str | None = None,
+    element_id: str | None = None,
+    target: dict[str, Any] | None = None,
+    observe: str = "auto",
+) -> dict[str, Any]:
+    return await APP.submit_form(page_id, element_id, target, observe)
+
+
 @expose("clipboard_read")
 async def _clipboard_read(page_id: str) -> dict[str, Any]:
     return await APP.clipboard_read(page_id)
@@ -4750,6 +5435,31 @@ async def _fill_form(
     observe: str = "auto",
 ) -> dict[str, Any]:
     return await APP.fill_form(page_id, fields, form_target, submit, observe)
+
+
+@expose("fill_and_click")
+async def _fill_and_click(
+    page_id: str,
+    fields: list[dict[str, Any]],
+    click_target: dict[str, Any],
+    observe: str = "auto",
+) -> dict[str, Any]:
+    return await APP.fill_and_click(page_id, fields, click_target, observe)
+
+
+@expose("click_and_wait")
+async def _click_and_wait(
+    page_id: str | None = None,
+    element_id: str | None = None,
+    target: dict[str, Any] | None = None,
+    button: str = "left",
+    click_count: int = 1,
+    timeout_ms: int = DEFAULT_TIMEOUT_MS,
+    wait_for: str = "navigation",
+    wait_target: dict[str, Any] | None = None,
+    observe: str = "auto",
+) -> dict[str, Any]:
+    return await APP.click_and_wait(page_id, element_id, target, button, click_count, timeout_ms, wait_for, wait_target, observe)
 
 
 @expose("wait_for")

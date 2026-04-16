@@ -64,6 +64,22 @@ def register_app() -> tuple[BrowserPuppetApp, ContextState, PageState]:
     return app, context, page_state
 
 
+def test_local_network_is_allowed_by_default_and_can_be_disabled() -> None:
+    app, context, _ = register_app()
+
+    assert app._blocked_target_reason("localhost", context) is None
+    assert app._blocked_target_reason("127.0.0.1", context) is None
+    assert app._blocked_target_reason("10.0.2.15", context) is None
+    assert app._blocked_target_reason("169.254.169.254", context) is None
+
+    context.config["allow_local_network"] = False
+
+    assert app._blocked_target_reason("localhost", context) == "localhost access is blocked by default policy"
+    assert app._blocked_target_reason("127.0.0.1", context) == "loopback access is blocked by default policy"
+    assert app._blocked_target_reason("10.0.2.15", context) == "RFC1918/private network access is blocked by default policy"
+    assert app._blocked_target_reason("169.254.169.254", context) == "RFC1918/private network access is blocked by default policy"
+
+
 @pytest.mark.asyncio
 async def test_notification_capture_script_and_retrieval() -> None:
     app, _, page_state = register_app()

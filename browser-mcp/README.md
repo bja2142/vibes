@@ -10,8 +10,9 @@ Browser Puppet is a Python MCP server that exposes stateful Playwright-driven br
 - Inline target resolution for interaction tools
 - Post-action observation bundles and named checkpoints
 - DOM, accessibility, console, network, storage, and screenshot tooling
-- Batch actions via `fill_form` and `run_steps`
+- Batch actions via `fill_form`, `fill_and_click`, `submit_form`, `click_and_wait`, and `run_steps`
 - Artifact capture for screenshots, traces, downloads, storage state, and reports
+- Compatibility shorthands for legacy `args`/`kwargs` wrappers and loose `target`/`query` payloads
 
 ## Run
 
@@ -35,6 +36,18 @@ Logging:
 - `--log-level DEBUG` adds tool arguments, summarized results, and failure tracebacks
 - `--log-level TRACE` is the deepest troubleshooting mode and is treated as debug-equivalent for the underlying ASGI server
 - the same setting can be provided with `BROWSER_PUPPET_LOG_LEVEL`
+
+Local network policy:
+
+- browser contexts allow `localhost`, loopback, private RFC1918 ranges, and link-local targets by default
+- set `allow_local_network: false` in the `create_context` profile if you want to re-enable blocking for local targets
+- or enable it server-wide with `BROWSER_PUPPET_ALLOW_LOCAL_NETWORK=true`
+
+Browser launch mode:
+
+- browser contexts launch headed by default
+- set `headless: true` in the `create_context` profile only when you explicitly want headless mode
+- in Docker and Compose, the server starts under Xvfb so headed Playwright has a valid X session
 
 Transient internal tool retry:
 
