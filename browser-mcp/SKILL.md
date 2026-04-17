@@ -32,7 +32,7 @@ Every browser task follows this pattern:
 |------|-----------|---------|
 | `create_context` | `browser: str`, `profile?: dict` | Create a browser context. Profile supports: `viewport`, `user_agent`, `locale`, `timezone`, `geolocation`, `mobile`, `touch`, `headers`, `device_scale_factor`, `permissions`, `allow_local_network`, `enable_coverage`, `preset`, `profile_state`, `record_har`, `record_video` |
 | `open_page` | `context_id: str`, `url: str`, `wait_until?: str = "load"`, `timeout_ms?: int = 30000` | Open a new page at a URL. Returns `page_id`, navigation status, timeout, redirect chain, and page digest |
-| `navigate` | `page_id: str`, `url: str`, `wait_until?: str = "load"`, `timeout_ms?: int = 30000` | Navigate an existing page to a new URL with an explicit navigation timeout |
+| `navigate` | `page_id: str`, `url: str`, `wait_until?: str = "load"`, `timeout_ms?: int = 30000`, `observe?: str = "off"` | Navigate an existing page to a new URL with an explicit navigation timeout. Observation is off by default so navigation returns without the post-navigation digest unless you explicitly request it |
 | `reload_page` | `page_id: str`, `ignore_cache?: bool = false` | Reload the current page |
 | `go_back` | `page_id: str` | Navigate back in history |
 | `go_forward` | `page_id: str` | Navigate forward in history |
@@ -79,34 +79,36 @@ Many interaction tools accept `observe: str = "auto"` which controls post-action
 
 | Tool | Parameters | Purpose |
 |------|-----------|---------|
-| `click` | `page_id?: str`, `element_id?: str`, `target?: dict`, `button?: str = "left"`, `click_count?: int = 1`, `timeout_ms?: int`, `observe?: str = "auto"` | Click an element |
-| `tap` | `page_id?: str`, `element_id?: str`, `target?: dict`, `observe?: str = "auto"` | Tap (touch) an element |
-| `type_text` | `text: str`, `page_id?: str`, `element_id?: str`, `target?: dict`, `clear_first?: bool = true`, `typing_mode?: str = "auto"`, `keystroke_delay_ms?: int`, `keystroke_jitter_ms?: int`, `observe?: str = "auto"` | Type text into a targeted element or, if no target is supplied, into the currently focused element. Use `typing_mode="keystrokes"` for consoles, terminals, and editors that need real key events. If timing values are omitted, browser-puppet picks random millisecond defaults for delay and jitter. Supports `{{cred:alias}}` for secrets |
-| `press_key` | `page_id: str`, `key: str`, `observe?: str = "auto"` | Press a keyboard key (e.g., `"Enter"`, `"Tab"`, `"Escape"`) |
-| `press_key_chord` | `page_id: str`, `keys: list[str]`, `observe?: str = "auto"` | Press a key combination (e.g., `["Control", "a"]`) |
+| `click` | `page_id?: str`, `element_id?: str`, `target?: dict`, `button?: str = "left"`, `click_count?: int = 1`, `timeout_ms?: int`, `observe?: str = "off"` | Click an element |
+| `tap` | `page_id?: str`, `element_id?: str`, `target?: dict`, `observe?: str = "off"` | Tap (touch) an element |
+| `type_text` | `text: str`, `page_id?: str`, `element_id?: str`, `target?: dict`, `clear_first?: bool = true`, `typing_mode?: str = "auto"`, `keystroke_delay_ms?: int`, `keystroke_jitter_ms?: int`, `observe?: str = "off"` | Type text into a targeted element or, if no target is supplied, into the currently focused element. Use `typing_mode="keystrokes"` for consoles, terminals, and editors that need real key events. If timing values are omitted, browser-puppet picks random millisecond defaults for delay and jitter. Supports `{{cred:alias}}` for secrets |
+| `press_key` | `page_id: str`, `key: str`, `observe?: str = "off"` | Press a keyboard key (e.g., `"Enter"`, `"Tab"`, `"Escape"`) |
+| `press_key_chord` | `page_id: str`, `keys: list[str]`, `observe?: str = "off"` | Press a key combination (e.g., `["Control", "a"]`) |
 | `hover` | `page_id?: str`, `element_id?: str`, `target?: dict` | Hover over an element |
-| `drag_and_drop` | `page_id: str`, `source_element_id?: str`, `source_target?: dict`, `target_element_id?: str`, `dest_target?: dict`, `observe?: str = "auto"` | Drag from source to destination |
-| `select_dropdown` | `value: str`, `page_id?: str`, `element_id?: str`, `target?: dict`, `observe?: str = "auto"` | Select an option from a `<select>` dropdown |
-| `set_checkbox` | `checked: bool`, `page_id?: str`, `element_id?: str`, `target?: dict`, `observe?: str = "auto"` | Set a checkbox to checked or unchecked |
-| `upload_file` | `file_path: str`, `page_id?: str`, `element_id?: str`, `target?: dict`, `observe?: str = "auto"` | Upload a file to a file input |
-| `fill_form` | `page_id: str`, `fields: list[dict]`, `form_target?: dict`, `submit?: bool = false`, `observe?: str = "auto"` | Fill multiple form fields at once. Each field is `{"target": ..., "value": ...}`. Set `submit: true` to auto-submit |
-| `fill_and_click` | `page_id: str`, `fields: list[dict]`, `click_target: dict`, `observe?: str = "auto"` | Fill one or more fields, then click a submit or continuation target |
-| `submit_form` | `page_id?: str`, `element_id?: str`, `target?: dict`, `observe?: str = "auto"` | Submit a form via `requestSubmit()` using a form element or an element inside a form |
+| `drag_and_drop` | `page_id: str`, `source_element_id?: str`, `source_target?: dict`, `target_element_id?: str`, `dest_target?: dict`, `observe?: str = "off"` | Drag from source to destination |
+| `select_dropdown` | `value: str`, `page_id?: str`, `element_id?: str`, `target?: dict`, `observe?: str = "off"` | Select an option from a `<select>` dropdown |
+| `set_checkbox` | `checked: bool`, `page_id?: str`, `element_id?: str`, `target?: dict`, `observe?: str = "off"` | Set a checkbox to checked or unchecked |
+| `upload_file` | `file_path: str`, `page_id?: str`, `element_id?: str`, `target?: dict`, `observe?: str = "off"` | Upload a file to a file input |
+| `fill_form` | `page_id: str`, `fields: list[dict]`, `form_target?: dict`, `submit?: bool = false`, `observe?: str = "off"` | Fill multiple form fields at once. Each field is `{"target": ..., "value": ...}`. Set `submit: true` to auto-submit |
+| `fill_and_click` | `page_id: str`, `fields: list[dict]`, `click_target: dict`, `observe?: str = "off"` | Fill one or more fields, then click a submit or continuation target |
+| `submit_form` | `page_id?: str`, `element_id?: str`, `target?: dict`, `observe?: str = "off"` | Submit a form via `requestSubmit()` using a form element or an element inside a form |
 | `click_and_wait` | `page_id?: str`, `element_id?: str`, `target?: dict`, `wait_for?: str = "navigation"`, `wait_target?: dict` | Click a target and then wait for navigation, network idle, URL, or element state |
 | `fill_contenteditable` | `html: str`, `page_id?: str`, `element_id?: str`, `target?: dict` | Set HTML content in a contenteditable element |
 | `set_input_value` | `value: str`, `page_id?: str`, `element_id?: str`, `target?: dict` | Programmatically set an input value (no keystrokes) |
 | `select_date` | `value: str`, `page_id?: str`, `element_id?: str`, `target?: dict` | Set a date input value |
 | `handle_dialog` | `action: str`, `prompt_text?: str` | Accept or dismiss a browser dialog (alert, confirm, prompt) |
-| `long_press` | `page_id?: str`, `element_id?: str`, `target?: dict`, `duration_ms?: int = 800`, `observe?: str = "auto"` | Long press (touch hold) |
-| `swipe` | `page_id: str`, `start: dict`, `end: dict`, `duration_ms?: int = 300`, `observe?: str = "auto"` | Swipe gesture. `start`/`end` are `{"x": int, "y": int}` |
+| `long_press` | `page_id?: str`, `element_id?: str`, `target?: dict`, `duration_ms?: int = 800`, `observe?: str = "off"` | Long press (touch hold) |
+| `swipe` | `page_id: str`, `start: dict`, `end: dict`, `duration_ms?: int = 300`, `observe?: str = "off"` | Swipe gesture. `start`/`end` are `{"x": int, "y": int}` |
 | `mouse_move` | `page_id: str`, `x: int`, `y: int` | Move mouse to coordinates |
-| `mouse_click_at` | `page_id: str`, `x: int`, `y: int`, `button?: str = "left"`, `observe?: str = "auto"` | Click at specific coordinates (use only when semantic targeting fails) |
+| `mouse_click_at` | `page_id: str`, `x: int`, `y: int`, `button?: str = "left"`, `observe?: str = "off"` | Click at specific coordinates (use only when semantic targeting fails) |
 | `mouse_wheel` | `page_id: str`, `delta_x: int`, `delta_y: int` | Scroll via mouse wheel |
 | `scroll` | `page_id: str`, `direction: str`, `amount_px?: int` | Scroll the page in a direction |
 | `scroll_element` | `direction: str`, `amount_px?: int = 200`, `page_id?: str`, `element_id?: str`, `target?: dict` | Scroll a specific scrollable element |
 | `clipboard_read` | `page_id: str` | Read clipboard contents |
 | `clipboard_write` | `page_id: str`, `text: str` | Write to clipboard. Supports `{{cred:alias}}` |
-| `wait_for` | `target: dict`, `state: str`, `page_id?: str`, `observe?: str = "auto"` | Wait for an element to reach a state (`"visible"`, `"hidden"`, `"attached"`, `"detached"`) |
+| `wait_for` | `target: dict`, `state: str`, `page_id?: str`, `observe?: str = "off"` | Wait for an element to reach a state (`"visible"`, `"hidden"`, `"attached"`, `"detached"`) |
+| `run_steps` | `page_id: str`, `steps: list[dict]`, `stop_on_failure?: bool = true`, `observe?: str = "final_only"` | Run a batch of actions sequentially |
+| `run_action_and_describe` | `action: dict`, `expect?: dict`, `mode?: str = "compact"` | Run an action and get a structured description of what changed |
 
 Compatibility shorthand:
 
@@ -125,8 +127,13 @@ Browser mode:
 - contexts launch headed by default
 - set `profile={"headless": true}` only when you explicitly want headless mode
 - containerized deployments are expected to provide a valid X session via Xvfb
-| `run_steps` | `page_id: str`, `steps: list[dict]`, `stop_on_failure?: bool = true`, `observe?: str = "final_only"` | Run a batch of actions sequentially |
-| `run_action_and_describe` | `action: dict`, `expect?: dict`, `mode?: str = "compact"` | Run an action and get a structured description of what changed |
+
+Page issue notices:
+
+- page-scoped tool responses may include `issue_notices` when new console errors or failed network requests were observed on that page
+- network notices use the form `METHOD ROUTE: CODE`, for example `GET /api/items: 500`
+- console notices are intentionally high level; use `get_console_logs`, `get_page_errors`, or `get_network_traffic` if you need detail
+- long-running page waits such as `navigate`, `open_page`, `reload_page`, `wait_for`, `click_and_wait`, and `execute_page_js` can interrupt early when a new console or network issue appears
 
 ### Viewport & Emulation
 
@@ -173,7 +180,7 @@ Browser mode:
 | `get_console_logs` | `page_id: str`, `level?: str`, `since?: str`, `cursor?: str`, `limit?: int` | Get console log entries. Paginated |
 | `get_page_errors` | `page_id: str`, `since?: str`, `cursor?: str`, `limit?: int` | Get uncaught page errors. Paginated |
 | `get_runtime_digest` | `page_id: str`, `since?: str`, `mode?: str = "compact"` | Combined runtime summary (console + errors + key events) |
-| `execute_page_js` | `page_id: str`, `script: str`, `timeout_ms?: int = 10000` | Execute JavaScript in the page context. Increase `timeout_ms` for long-running scripts |
+| `execute_page_js` | `page_id: str`, `script: str`, `timeout_ms?: int = 10000` | Execute JavaScript in the page context with an explicit timeout. Use `navigate` or `reload_page` instead of navigation-causing scripts like `location.reload()` |
 | `execute_local_python` | `script: str`, `context_id: str`, `timeout_ms?: int = 10000` | Execute Python in the server process. Increase `timeout_ms` for slow scripts (default 10s) |
 
 ### Cookies & Storage

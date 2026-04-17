@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
 import functools
 import fnmatch
 import inspect
@@ -670,23 +670,8 @@ class BrowserPuppetApp:
         def add_page_event(kind: str, payload: dict[str, Any]) -> None:
             page_state.buffers.page_events.append({"kind": kind, "timestamp": utc_ts(), **payload})
 
-        page.on(
-            "console",
-            lambda msg: page_state.buffers.console.append(
-                {
-                    "timestamp": utc_ts(),
-                    "type": msg.type,
-                    "text": summarize_text(msg.text, 500),
-                    "location": safe_json(msg.location),
-                }
-            ),
-        )
-        page.on(
-            "pageerror",
-            lambda exc: page_state.buffers.errors.append(
-                {"timestamp": utc_ts(), "message": summarize_text(str(exc), 800)}
-            ),
-        )
+        page.on("console", lambda msg: self._record_console_message(page_state, msg))
+        page.on("pageerror", lambda exc: self._record_page_error(page_state, exc))
         page.on(
             "dialog",
             lambda dialog: page_state.buffers.dialogs.append(
@@ -764,6 +749,60 @@ class BrowserPuppetApp:
                 return None
         return redirected_from
 
+    def _queue_page_issue_notice(self, page_state: PageState, notice: dict[str, Any]) -> None:
+        key = notice["key"]
+        if key in page_state.pending_issue_keys:
+            return
+        page_state.pending_issue_keys.add(key)
+        stored = {k: v for k, v in notice.items() if k != "key"}
+        page_state.pending_issue_notices.append(stored)
+        for waiter in list(page_state.issue_waiters):
+            if not waiter.done():
+                waiter.set_result(stored)
+        page_state.issue_waiters = [waiter for waiter in page_state.issue_waiters if not waiter.done()]
+
+    def _route_from_url(self, url: str) -> str:
+        parsed = urlparse(url)
+        route = parsed.path or "/"
+        if parsed.query:
+            route = f"{route}?{parsed.query}"
+        return route or url
+
+    def _record_console_message(self, page_state: PageState, msg: Any) -> None:
+        entry = {
+            "timestamp": utc_ts(),
+            "type": msg.type,
+            "text": summarize_text(msg.text, 500),
+            "location": safe_json(msg.location),
+        }
+        page_state.buffers.console.append(entry)
+        if msg.type == "error":
+            self._queue_page_issue_notice(
+                page_state,
+                {
+                    "key": f"console:{entry['text']}",
+                    "kind": "console_error",
+                    "summary": "JavaScript console errors were observed on this page.",
+                    "message": "JavaScript console errors were observed while waiting on this page. Check console/runtime diagnostics.",
+                    "latest_error": entry["text"],
+                    "location": entry["location"],
+                },
+            )
+
+    def _record_page_error(self, page_state: PageState, exc: Exception) -> None:
+        entry = {"timestamp": utc_ts(), "message": summarize_text(str(exc), 800)}
+        page_state.buffers.errors.append(entry)
+        self._queue_page_issue_notice(
+            page_state,
+            {
+                "key": f"pageerror:{entry['message']}",
+                "kind": "console_error",
+                "summary": "JavaScript console errors were observed on this page.",
+                "message": "JavaScript console errors were observed while waiting on this page. Check console/runtime diagnostics.",
+                "latest_error": entry["message"],
+            },
+        )
+
     async def _record_response(self, page_state: PageState, response: Any) -> None:
         request = response.request
         request_id = getattr(request, "_browser_puppet_request_id", new_id("req"))
@@ -784,6 +823,21 @@ class BrowserPuppetApp:
             "headers": dict(response.headers),
             "url": response.url,
         }
+        if response.status >= 400:
+            route = self._route_from_url(response.url or request.url)
+            summary = f"{request.method} {route}: {response.status}"
+            self._queue_page_issue_notice(
+                page_state,
+                {
+                    "key": f"network:{request.method}:{route}:{response.status}",
+                    "kind": "network_error",
+                    "summary": summary,
+                    "message": f"Network request error observed while waiting on this page: {summary}",
+                    "method": request.method,
+                    "route": route,
+                    "status": response.status,
+                },
+            )
         if len(page_state.response_bodies) < 50:
             try:
                 body = await response.body()
@@ -799,6 +853,65 @@ class BrowserPuppetApp:
                     "policy": summarize_text(csp, 600),
                 }
             )
+
+    def _consume_pending_issue_notices(self, page_state: PageState) -> list[dict[str, Any]]:
+        notices = list(page_state.pending_issue_notices)
+        page_state.pending_issue_notices.clear()
+        page_state.pending_issue_keys.clear()
+        return notices
+
+    def _attach_page_issue_notices(self, page_state: PageState, payload: dict[str, Any]) -> dict[str, Any]:
+        notices = self._consume_pending_issue_notices(page_state)
+        if notices:
+            payload["issue_notices"] = notices
+        return payload
+
+    def _resolve_page_state_for_payload(
+        self, tool_signature: inspect.Signature, call_args: tuple[Any, ...], call_kwargs: dict[str, Any], payload: dict[str, Any]
+    ) -> PageState | None:
+        page_id = payload.get("page_id")
+        if page_id is None:
+            target = payload.get("target")
+            if isinstance(target, dict):
+                page_id = target.get("page_id")
+        if page_id is None:
+            try:
+                bound = tool_signature.bind_partial(*call_args, **call_kwargs)
+            except TypeError:
+                bound = None
+            if bound is not None:
+                page_id = bound.arguments.get("page_id")
+        if page_id is None:
+            return None
+        try:
+            return self.get_page_state(page_id)
+        except SemanticError:
+            return None
+
+    async def _await_with_page_issue_interrupt(self, page_state: PageState, awaitable: Any) -> Any:
+        task = asyncio.create_task(awaitable)
+        loop = asyncio.get_running_loop()
+        issue_future = loop.create_future()
+        page_state.issue_waiters.append(issue_future)
+        try:
+            done, _ = await asyncio.wait({task, issue_future}, return_when=asyncio.FIRST_COMPLETED)
+            if issue_future in done and not task.done():
+                issue = issue_future.result()
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+                raise SemanticError(
+                    "page_issue_interrupt",
+                    issue.get("message", "A page issue was detected while waiting on this page."),
+                    target={"page_id": page_state.page_id, "issue": issue.get("summary")},
+                    likely_causes=[issue.get("summary")] if issue.get("summary") else [],
+                    next_steps=["get_console_logs", "get_page_errors", "get_network_traffic"],
+                )
+            return await task
+        finally:
+            page_state.issue_waiters = [waiter for waiter in page_state.issue_waiters if waiter is not issue_future and not waiter.done()]
+            if not issue_future.done():
+                issue_future.cancel()
 
     def _build_redirect_chain(self, page_state: PageState, final_url: str | None = None) -> list[dict[str, Any]]:
         if not page_state.request_map:
@@ -1000,8 +1113,8 @@ class BrowserPuppetApp:
         if context.browser_name != "chromium":
             return
         session = await self._ensure_cdp_session(page_state)
-        if context.config.get("user_agent_override"):
-            ua = context.config["user_agent_override"]
+        ua = context.config.get("user_agent_override") or context.config.get("user_agent")
+        if ua:
             override_params: dict[str, Any] = {"userAgent": ua}
             ua_metadata = context.config.get("user_agent_metadata")
             if ua_metadata:
@@ -1411,9 +1524,14 @@ class BrowserPuppetApp:
         allowed = browser_specific.get(browser_name, [])
         return {key: presets[key] for key in allowed}
 
+    def _default_profile_preset(self, browser_name: str) -> str | None:
+        if browser_name == "chromium":
+            return "chromium_desktop"
+        return None
+
     def _merge_profile_preset(self, browser: str, profile: dict[str, Any]) -> dict[str, Any]:
         merged = dict(profile)
-        preset_name = merged.get("preset")
+        preset_name = merged.get("preset") or self._default_profile_preset(browser)
         if not preset_name:
             return merged
         presets = self._browser_profile_presets(browser)
@@ -1425,6 +1543,7 @@ class BrowserPuppetApp:
                 target={"browser": browser, "preset": preset_name, "available_presets": sorted(presets)},
             )
         merged_profile = safe_json(preset)
+        merged_profile["preset"] = preset_name
         for key, value in merged.items():
             if key == "headers" and isinstance(value, dict):
                 merged_headers = dict(merged_profile.get("headers", {}))
@@ -1752,53 +1871,80 @@ class BrowserPuppetApp:
         self._check_page_limit(context)
         page = await context.playwright_context.new_page()
         page_state = await self.register_page(context, page)
-        response = await page.goto(url, wait_until=wait_until, timeout=timeout_ms)
-        redirect_chain = self._build_redirect_chain(page_state, page.url)
-        await self.capture_page_meta(page_state)
-        return tool_result(
-            {
-                "page_id": page_state.page_id,
-                "url": page.url,
-                "status": response.status if response else None,
-                "timeout_ms": timeout_ms,
-                "redirect_chain": redirect_chain,
-                "digest": await self.get_page_digest(page_state.page_id, mode=self.state.defaults.mode),
-            }
-        )
 
-    async def navigate(self, page_id: str, url: str, wait_until: str = "load", timeout_ms: int = DEFAULT_NAVIGATION_TIMEOUT_MS) -> dict[str, Any]:
+        async def run_navigation() -> dict[str, Any]:
+            response = await page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+            redirect_chain = self._build_redirect_chain(page_state, page.url)
+            await self.capture_page_meta(page_state)
+            return tool_result(
+                {
+                    "page_id": page_state.page_id,
+                    "url": page.url,
+                    "status": response.status if response else None,
+                    "timeout_ms": timeout_ms,
+                    "redirect_chain": redirect_chain,
+                    "digest": await self.get_page_digest(page_state.page_id, mode=self.state.defaults.mode),
+                }
+            )
+
+        return await self._await_with_page_issue_interrupt(page_state, run_navigation())
+
+    async def navigate(
+        self,
+        page_id: str,
+        url: str,
+        wait_until: str = "load",
+        timeout_ms: int = DEFAULT_NAVIGATION_TIMEOUT_MS,
+        observe: str = "off",
+    ) -> dict[str, Any]:
         page_state = self.get_page_state(page_id)
-        before = await self.get_lightweight_checkpoint(page_state)
-        response = await page_state.playwright_page.goto(url, wait_until=wait_until, timeout=timeout_ms)
-        return await self.action_outcome(
-            page_state,
-            "navigate",
-            before,
-            extra={"status": response.status if response else None, "timeout_ms": timeout_ms},
-        )
+        before = await self.before_mutation(page_state, observe)
+
+        async def run_navigation() -> dict[str, Any]:
+            response = await page_state.playwright_page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+            return await self.action_outcome(
+                page_state,
+                "navigate",
+                before,
+                extra={"status": response.status if response else None, "timeout_ms": timeout_ms},
+            )
+
+        return await self._await_with_page_issue_interrupt(page_state, run_navigation())
 
     async def reload_page(self, page_id: str, ignore_cache: bool = False) -> dict[str, Any]:
         page_state = self.get_page_state(page_id)
         before = await self.get_lightweight_checkpoint(page_state)
-        response = await page_state.playwright_page.reload(wait_until="load")
-        return await self.action_outcome(
-            page_state,
-            "reload_page",
-            before,
-            extra={"status": response.status if response else None, "ignore_cache": ignore_cache},
-        )
+
+        async def run_reload() -> dict[str, Any]:
+            response = await page_state.playwright_page.reload(wait_until="load")
+            return await self.action_outcome(
+                page_state,
+                "reload_page",
+                before,
+                extra={"status": response.status if response else None, "ignore_cache": ignore_cache},
+            )
+
+        return await self._await_with_page_issue_interrupt(page_state, run_reload())
 
     async def go_back(self, page_id: str) -> dict[str, Any]:
         page_state = self.get_page_state(page_id)
         before = await self.get_lightweight_checkpoint(page_state)
-        response = await page_state.playwright_page.go_back()
-        return await self.action_outcome(page_state, "go_back", before, extra={"status": response.status if response else None})
+
+        async def run_go_back() -> dict[str, Any]:
+            response = await page_state.playwright_page.go_back()
+            return await self.action_outcome(page_state, "go_back", before, extra={"status": response.status if response else None})
+
+        return await self._await_with_page_issue_interrupt(page_state, run_go_back())
 
     async def go_forward(self, page_id: str) -> dict[str, Any]:
         page_state = self.get_page_state(page_id)
         before = await self.get_lightweight_checkpoint(page_state)
-        response = await page_state.playwright_page.go_forward()
-        return await self.action_outcome(page_state, "go_forward", before, extra={"status": response.status if response else None})
+
+        async def run_go_forward() -> dict[str, Any]:
+            response = await page_state.playwright_page.go_forward()
+            return await self.action_outcome(page_state, "go_forward", before, extra={"status": response.status if response else None})
+
+        return await self._await_with_page_issue_interrupt(page_state, run_go_forward())
 
     async def list_pages(self, context_id: str, cursor: str | None = None, limit: int | None = None) -> dict[str, Any]:
         context = self.get_context(context_id)
@@ -3328,39 +3474,42 @@ class BrowserPuppetApp:
         before = await self.before_mutation(page_state, observe)
         await locator.click(button=button, click_count=click_count, timeout=timeout_ms)
 
-        if wait_for == "navigation":
-            await page_state.playwright_page.wait_for_load_state("load", timeout=timeout_ms)
-        elif wait_for == "networkidle":
-            await page_state.playwright_page.wait_for_load_state("networkidle", timeout=timeout_ms)
-        elif wait_for == "url":
-            if not wait_target or "pattern" not in wait_target:
+        async def run_wait() -> dict[str, Any]:
+            if wait_for == "navigation":
+                await page_state.playwright_page.wait_for_load_state("load", timeout=timeout_ms)
+            elif wait_for == "networkidle":
+                await page_state.playwright_page.wait_for_load_state("networkidle", timeout=timeout_ms)
+            elif wait_for == "url":
+                if not wait_target or "pattern" not in wait_target:
+                    raise SemanticError(
+                        "missing_target",
+                        "click_and_wait with wait_for='url' requires wait_target.pattern.",
+                        target={"wait_for": wait_for},
+                    )
+                await page_state.playwright_page.wait_for_url(wait_target["pattern"], timeout=wait_target.get("timeout_ms", timeout_ms))
+            elif wait_for in {"element", "hidden"}:
+                if not wait_target:
+                    raise SemanticError(
+                        "missing_target",
+                        f"click_and_wait with wait_for='{wait_for}' requires wait_target.",
+                        target={"wait_for": wait_for},
+                    )
+                _, wait_locator = await self.resolve_locator(page_id=page_state.page_id, target=wait_target, source_name="wait_target")
+                await wait_locator.wait_for(state="hidden" if wait_for == "hidden" else "visible", timeout=wait_target.get("timeout_ms", timeout_ms))
+            else:
                 raise SemanticError(
-                    "missing_target",
-                    "click_and_wait with wait_for='url' requires wait_target.pattern.",
+                    "unsupported_wait",
+                    f"Unsupported click_and_wait wait_for '{wait_for}'.",
                     target={"wait_for": wait_for},
                 )
-            await page_state.playwright_page.wait_for_url(wait_target["pattern"], timeout=wait_target.get("timeout_ms", timeout_ms))
-        elif wait_for in {"element", "hidden"}:
-            if not wait_target:
-                raise SemanticError(
-                    "missing_target",
-                    f"click_and_wait with wait_for='{wait_for}' requires wait_target.",
-                    target={"wait_for": wait_for},
-                )
-            _, wait_locator = await self.resolve_locator(page_id=page_state.page_id, target=wait_target, source_name="wait_target")
-            await wait_locator.wait_for(state="hidden" if wait_for == "hidden" else "visible", timeout=wait_target.get("timeout_ms", timeout_ms))
-        else:
-            raise SemanticError(
-                "unsupported_wait",
-                f"Unsupported click_and_wait wait_for '{wait_for}'.",
-                target={"wait_for": wait_for},
-            )
 
-        outcome = await self.action_outcome(page_state, "click_and_wait", before)
-        outcome["wait_for"] = wait_for
-        if wait_target:
-            outcome["wait_target"] = wait_target
-        return outcome
+            outcome = await self.action_outcome(page_state, "click_and_wait", before)
+            outcome["wait_for"] = wait_for
+            if wait_target:
+                outcome["wait_target"] = wait_target
+            return outcome
+
+        return await self._await_with_page_issue_interrupt(page_state, run_wait())
 
     async def wait_for(self, target: dict[str, Any], state: str, page_id: str | None = None, observe: str = "auto") -> dict[str, Any]:
         if state in {"url", "networkidle"}:
@@ -3368,15 +3517,23 @@ class BrowserPuppetApp:
                 raise SemanticError("missing_target", "wait_for state requires page_id.")
             page_state = self.get_page_state(page_id)
             before = await self.before_mutation(page_state, observe)
-            if state == "url":
-                await page_state.playwright_page.wait_for_url(target["pattern"], timeout=target.get("timeout_ms", DEFAULT_TIMEOUT_MS))
-            else:
-                await page_state.playwright_page.wait_for_load_state("networkidle", timeout=target.get("timeout_ms", DEFAULT_TIMEOUT_MS))
-            return await self.action_outcome(page_state, "wait_for", before)
+
+            async def run_wait() -> dict[str, Any]:
+                if state == "url":
+                    await page_state.playwright_page.wait_for_url(target["pattern"], timeout=target.get("timeout_ms", DEFAULT_TIMEOUT_MS))
+                else:
+                    await page_state.playwright_page.wait_for_load_state("networkidle", timeout=target.get("timeout_ms", DEFAULT_TIMEOUT_MS))
+                return await self.action_outcome(page_state, "wait_for", before)
+
+            return await self._await_with_page_issue_interrupt(page_state, run_wait())
         page_state, locator = await self.resolve_locator(page_id=page_id, target=target)
         before = await self.before_mutation(page_state, observe)
-        await locator.wait_for(state=state, timeout=target.get("timeout_ms", DEFAULT_TIMEOUT_MS))
-        return await self.action_outcome(page_state, "wait_for", before)
+
+        async def run_wait() -> dict[str, Any]:
+            await locator.wait_for(state=state, timeout=target.get("timeout_ms", DEFAULT_TIMEOUT_MS))
+            return await self.action_outcome(page_state, "wait_for", before)
+
+        return await self._await_with_page_issue_interrupt(page_state, run_wait())
 
     async def run_action_and_describe(self, action: dict[str, Any], expect: dict[str, Any] | None = None, mode: str = "compact") -> dict[str, Any]:
         page_id = action.get("page_id") or self.state.current_page_id
@@ -4171,11 +4328,37 @@ class BrowserPuppetApp:
             await runtime.set_geolocation(payload)
         return tool_result({"success": True, "geolocation": payload})
 
-    async def execute_page_js(self, page_id: str, script: str) -> dict[str, Any]:
+    async def execute_page_js(self, page_id: str, script: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> dict[str, Any]:
         self._rate_limit("execute_page_js", window_seconds=10, max_calls=20)
         page_state = self.get_page_state(page_id)
-        result = await page_state.playwright_page.evaluate(script)
-        return tool_result({"result": safe_json(result)})
+
+        async def run_script() -> dict[str, Any]:
+            try:
+                result = await asyncio.wait_for(page_state.playwright_page.evaluate(script), timeout=timeout_ms / 1000)
+            except asyncio.TimeoutError as exc:
+                raise SemanticError(
+                    "script_timeout",
+                    f"Page JavaScript execution timed out after {timeout_ms} ms.",
+                    target={"page_id": page_id, "timeout_ms": timeout_ms},
+                    retryable=True,
+                ) from exc
+            except Exception as exc:
+                message = str(exc)
+                if "Execution context was destroyed" in message or "Cannot find context with specified id" in message:
+                    raise SemanticError(
+                        "page_context_destroyed",
+                        "Page JavaScript execution was interrupted because the page navigated or reloaded. Use navigate or reload_page for navigation-causing scripts.",
+                        target={"page_id": page_id},
+                        next_steps=["navigate", "reload_page"],
+                    ) from exc
+                raise SemanticError(
+                    "page_script_error",
+                    f"Page JavaScript execution failed: {summarize_text(message, 500)}",
+                    target={"page_id": page_id},
+                ) from exc
+            return tool_result({"page_id": page_id, "result": safe_json(result), "timeout_ms": timeout_ms})
+
+        return await self._await_with_page_issue_interrupt(page_state, run_script())
 
     async def execute_local_python(self, script: str, context_id: str) -> dict[str, Any]:
         process = await asyncio.create_subprocess_exec(
@@ -4610,6 +4793,20 @@ class BrowserPuppetApp:
         }
 
     async def action_outcome(self, page_state: PageState, tool_name: str, before: dict[str, Any] | None, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+        if before is None:
+            redirect_chain = self._build_redirect_chain(page_state, page_state.playwright_page.url)
+            response = {
+                "success": True,
+                "page_id": page_state.page_id,
+                "tool": tool_name,
+                "changes": {},
+                "redirect_chain": redirect_chain,
+                "url": page_state.playwright_page.url,
+                "observation": "off",
+            }
+            if extra:
+                response.update(extra)
+            return tool_result(response)
         current = await self.get_page_digest(page_state.page_id, mode="compact")
         changes = {}
         if before:
@@ -4786,6 +4983,9 @@ def expose(fn_name: str):
                     result = await func(*call_args, **call_kwargs)
                     duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
                     LOGGER.info("tool_response tool=%s duration_ms=%s attempt=%s", fn_name, duration_ms, attempt + 1)
+                    page_state = APP._resolve_page_state_for_payload(tool_signature, call_args, call_kwargs, result) if isinstance(result, dict) else None
+                    if page_state is not None:
+                        result = APP._attach_page_issue_notices(page_state, result)
                     if LOGGER.isEnabledFor(logging.DEBUG):
                         LOGGER.debug(
                             "tool_response_details tool=%s result=%s",
@@ -4811,6 +5011,10 @@ def expose(fn_name: str):
                         duration_ms,
                         summarize_text(str(exc), 800),
                     )
+                    error_payload = APP.normalize_exception(exc)
+                    page_state = APP._resolve_page_state_for_payload(tool_signature, call_args, call_kwargs, error_payload)
+                    if page_state is not None:
+                        error_payload = APP._attach_page_issue_notices(page_state, error_payload)
                     if LOGGER.isEnabledFor(logging.DEBUG):
                         LOGGER.debug(
                             "tool_error_details tool=%s args=%s kwargs=%s traceback=%s",
@@ -4819,7 +5023,7 @@ def expose(fn_name: str):
                             summarize_payload(call_kwargs, limit=2000),
                             traceback.format_exc(),
                         )
-                    return APP.normalize_exception(exc)  # type: ignore[return-value]
+                    return error_payload  # type: ignore[return-value]
 
         wrapper.__name__ = fn_name
         wrapper.__signature__ = tool_signature
@@ -4907,8 +5111,14 @@ async def _open_page(context_id: str, url: str, wait_until: str = "load", timeou
 
 
 @expose("navigate")
-async def _navigate(page_id: str, url: str, wait_until: str = "load", timeout_ms: int = DEFAULT_NAVIGATION_TIMEOUT_MS) -> dict[str, Any]:
-    return await APP.navigate(page_id, url, wait_until, timeout_ms)
+async def _navigate(
+    page_id: str,
+    url: str,
+    wait_until: str = "load",
+    timeout_ms: int = DEFAULT_NAVIGATION_TIMEOUT_MS,
+    observe: str = "off",
+) -> dict[str, Any]:
+    return await APP.navigate(page_id, url, wait_until, timeout_ms, observe)
 
 
 @expose("reload_page")
@@ -5557,8 +5767,8 @@ async def _get_runtime_digest(page_id: str, since: str | None = None, mode: str 
 
 
 @expose("execute_page_js")
-async def _execute_page_js(page_id: str, script: str) -> dict[str, Any]:
-    return await APP.execute_page_js(page_id, script)
+async def _execute_page_js(page_id: str, script: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> dict[str, Any]:
+    return await APP.execute_page_js(page_id, script, timeout_ms)
 
 
 @expose("execute_local_python")

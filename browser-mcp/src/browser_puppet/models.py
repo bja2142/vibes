@@ -71,6 +71,9 @@ class PageState:
     element_cache: TTLCache[ElementRecord] = field(default_factory=lambda: TTLCache(ttl_seconds=300, max_entries=512))
     request_map: dict[str, dict[str, Any]] = field(default_factory=dict)
     response_bodies: dict[str, bytes] = field(default_factory=dict)
+    pending_issue_notices: list[dict[str, Any]] = field(default_factory=list)
+    pending_issue_keys: set[str] = field(default_factory=set)
+    issue_waiters: list[Any] = field(default_factory=list)
     cdp_session: Any | None = None
     cdp_subscriptions: dict[str, dict[str, Any]] = field(default_factory=dict)
     websocket_map: dict[str, dict[str, Any]] = field(default_factory=dict)

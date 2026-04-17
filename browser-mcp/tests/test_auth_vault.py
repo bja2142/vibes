@@ -171,3 +171,36 @@ def test_create_context_rejects_missing_ca_bundle_path() -> None:
         asyncio.run(app.create_context("chromium", {"ca_bundle_path": "/tmp/does-not-exist.pem"}))
 
     assert getattr(excinfo.value, "error_code", None) == "ca_bundle_not_found"
+
+
+@pytest.mark.asyncio
+async def test_action_outcome_skips_digest_when_observation_is_off() -> None:
+    app = BrowserPuppetApp()
+    context = ContextState(
+        context_id="context-1",
+        browser_name="chromium",
+        browser=None,
+        playwright_context=None,
+        artifact_dir=Path(app.state.artifacts_root),
+    )
+    page_state = PageState(page_id="page-1", context_id=context.context_id, playwright_page=FakePage())
+    context.pages[page_state.page_id] = page_state
+    app.state.contexts[context.context_id] = context
+
+    async def fail_get_page_digest(*args, **kwargs):
+        raise AssertionError("get_page_digest should not run when observation is off")
+
+    app.get_page_digest = fail_get_page_digest  # type: ignore[method-assign]
+
+    outcome = await app.action_outcome(page_state, "navigate", None, extra={"status": 200})
+
+    assert outcome == {
+        "success": True,
+        "page_id": "page-1",
+        "tool": "navigate",
+        "changes": {},
+        "redirect_chain": [],
+        "url": "https://example.test",
+        "observation": "off",
+        "status": 200,
+    }

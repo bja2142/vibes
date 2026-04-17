@@ -60,7 +60,7 @@ For testing against infrastructure you control, prefer the profile-oriented pari
 
 Recommended flow:
 
-1. Use `create_context` with explicit profile fields or a `preset`.
+1. Use `create_context` with explicit profile fields or a `preset`. Chromium contexts now inherit the `chromium_desktop` preset by default, and any explicit profile fields override those defaults.
 2. If you already have known-good cookies or origin storage, load them with `profile_state`, `import_browser_profile`, or `load_storage_state`.
 3. Align request headers with `set_headers` and, for Chromium contexts, runtime user agent with `set_user_agent`.
 4. Open the page under test.
@@ -69,7 +69,7 @@ Recommended flow:
 
 Supported parity controls in this pass:
 
-- `preset` in `create_context` for browser-specific desktop defaults
+- `preset` in `create_context` for browser-specific desktop defaults; Chromium uses `chromium_desktop` unless you override fields
 - `headers`, `user_agent`, `locale`, `timezone`, `viewport`, `screen`, `device_scale_factor`, `mobile`, `touch`
 - `profile_state` in `create_context` to preload cookies and origin storage
 - `import_browser_profile` and `export_browser_profile` for cookie plus local/session storage round-tripping
@@ -93,7 +93,7 @@ Playwright and Chromium normally expose `navigator.webdriver = true` to page Jav
 
 ### Realistic default profile
 
-Profile presets no longer use static fingerprint-stable values. Instead:
+Chromium contexts now inherit the `chromium_desktop` preset by default, unless you override specific profile fields. That default profile avoids static fingerprint-stable values:
 
 - **Timezone** defaults to the host system timezone (read from `/etc/timezone` or `/etc/localtime` symlink) rather than `UTC`.
 - **Viewport** is selected randomly per context from common real-world desktop resolutions (1366x768, 1920x1080, 1536x864, 1440x900, 1280x720) with small random offsets to simulate browser chrome variation.
@@ -167,8 +167,7 @@ If you expect later evidence capture, configure it here rather than assuming you
 
 ### 2. Open A Page
 
-Use `open_page` to create and navigate a page. `open_page` and `navigate` both accept `timeout_ms`, which now defaults to `30000`.
-
+Use `open_page` to create and navigate a page. `open_page` and `navigate` both accept `timeout_ms`, which now defaults to `30000`. Observation is off by default on `navigate`, so it returns without the post-navigation digest unless you explicitly request observation. Page-scoped responses may also include `issue_notices` when the server has newly observed console errors or failed network requests for that page. Network notices use the form `METHOD ROUTE: CODE`.
 The result usually gives you:
 
 - `page_id`
@@ -207,6 +206,8 @@ Preferred mutation tools:
 - `wait_for`
 
 Use `observe` where post-action state matters. The mutation tools support an observation model that returns digest and change data after the action.
+
+If a page-scoped wait is in progress and a fresh console error or `4xx/5xx` network response arrives, the server can interrupt the wait and return that issue instead of hanging. This applies to the blocking page tools such as `open_page`, `navigate`, `reload_page`, history navigation, `wait_for`, `click_and_wait`, and `execute_page_js`.
 
 ### 5. Capture Evidence When Needed
 
@@ -738,3 +739,9 @@ Useful fallback reads:
 If you want to instruct another agent to use this MCP, this is a good compact prompt:
 
 `Use the browser-puppet MCP at http://127.0.0.1:8000/mcp for browser runtime tasks. Start with create_context and open_page, inspect before acting, prefer element_id handles from discovery tools, use observe-capable mutation tools for important state changes, and capture artifacts only when they materially help verify or explain behavior.`
+
+## Page JavaScript Guidance
+
+- `execute_page_js` is for DOM reads and in-page state changes that should finish in the current execution context.
+- It now has an explicit `timeout_ms` and returns a structured timeout or script error instead of waiting indefinitely.
+- Use `navigate` or `reload_page` instead of causing navigation from `execute_page_js` with calls like `location.reload()` or `location.href = ...`.
