@@ -138,7 +138,7 @@ The single largest source of token waste in agent-driven browser automation is *
 
 | Tool Name | Parameters | Description | Returns |
 | :--- | :--- | :--- | :--- |
-| `create_context` | `browser` (enum: chromium, firefox), `profile?` (obj) | Creates a fresh isolated browser context with optional desktop/mobile emulation and permissions. | `context_id` plus effective config |
+| `create_context` | `browser` (enum: chromium, firefox), `profile?` (obj) | Creates a fresh isolated browser context with optional desktop/mobile emulation, permissions, and Chromium launch-time overrides such as `treat_insecure_origins_as_secure`. | `context_id` plus effective config |
 | `open_page` | `context_id` (str), `url` (str), `wait_until?` (enum: domcontentloaded, load, networkidle) | Opens a page in the target context. | `page_id`, final URL, status |
 | `navigate` | `page_id` (str), `url` (str), `wait_until?` (enum) | Navigates the active page. | Final URL, status, timing summary |
 | `reload_page` | `page_id` (str), `ignore_cache?` (bool) | Reloads the current page. | Status and timing summary |
@@ -148,9 +148,11 @@ The single largest source of token waste in agent-driven browser automation is *
 | `switch_page` | `page_id` (str) | Switches operational focus to another tab or popup. | Page title and URL |
 | `resize_viewport` | `page_id` (str), `width` (int), `height` (int) | Changes viewport size for responsive testing. | Effective viewport info |
 | `set_emulation` | `page_id` (str), `settings` (obj) | Updates viewport/device/touch/locale/color-scheme/reduced-motion settings where supported. | Effective emulation config |
+| `set_context_persistence` | `context_id` (str), `persistent` (bool) | Marks a context as persistent or eligible for stale auto-close. | Success boolean + effective persistence |
 | `scroll` | `page_id` (str), `direction` (enum: up, down, top, bottom), `amount_px?` (int) | Scrolls the active viewport or page. | Updated scroll metrics |
 | `close_page` | `page_id` (str) | Closes a single page or popup. | Success boolean |
 | `close_context` | `context_id` (str) | Destroys the context and clears session data. | Success boolean |
+| `close_stale_contexts` | none | Immediately closes stale non-persistent contexts based on the configured stale timeout. | Closed context summary |
 | `save_storage_state` | `context_id` (str), `path?` (str) | Exports cookies + localStorage for session reuse. | File path or JSON blob |
 | `load_storage_state` | `context_id` (str), `state` (str or obj) | Restores a previously saved storage state into the context. | Success boolean |
 | `set_extra_http_headers` | `page_id` (str), `headers` (obj) | Sets persistent extra HTTP headers on a specific page (complementing context-level `set_headers`). | Success boolean |
@@ -310,6 +312,7 @@ The single largest source of token waste in agent-driven browser automation is *
 | :--- | :--- | :--- | :--- |
 | `get_pending_notifications` | `page_id` (str) | Returns browser notifications triggered via the Notifications API during the session. | JSON array |
 | `set_permission` | `context_id` (str), `permission` (str), `state` (enum: granted, denied, prompt) | Dynamically sets permission state (geolocation, notifications, clipboard-read, camera, microphone, etc.). | Success boolean |
+| `set_insecure_origins_as_secure` | `context_id` (str), `origins` (array[str]) | Recreates a Chromium context in place with `--unsafely-treat-insecure-origin-as-secure` so local non-TLS origins can use secure-context-gated APIs such as clipboard access. Existing pages are closed. | Success boolean + recreated context summary |
 | `update_geolocation` | `context_id` (str), `latitude` (float), `longitude` (float), `accuracy?` (float) | Dynamically updates geolocation mid-session (complementing initial context config). | Success boolean |
 
 ### 5.11. CDP / Low-Level Protocol Access
@@ -440,12 +443,12 @@ The MCP must support workflows common in web exploitation labs:
 - Base64/encoding utility tools or delegation to `execute_page_js` for decoding challenge payloads
 
 ### 7.5. Resource and Abuse Limits
-- Maximum concurrent contexts per session (configurable, default 5)
+- Maximum concurrent contexts per session (configurable, default 10)
 - Maximum pages per context (configurable, default 20)
 - Maximum total memory per browser node (enforced via container limits)
 - Per-tool timeout defaults with agent-overridable maximums
 - Rate limiting on high-frequency tools (`take_screenshot`, `execute_page_js`) to prevent runaway loops
-- Automatic context cleanup after idle timeout
+- Automatic context cleanup after one hour of inactivity by default, with per-context persistence opt-out
 
 ## 8. Error Handling Protocol (Semantic Reporting)
 The server must translate raw Playwright and browser exceptions into actionable, semantic context for the agent.

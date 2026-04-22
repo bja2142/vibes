@@ -12,9 +12,13 @@ from browser_puppet.server import BrowserPuppetApp
 class FakeRuntime:
     def __init__(self) -> None:
         self.routes = []
+        self.closed = 0
 
     async def route(self, pattern: str, handler) -> None:
         self.routes.append((pattern, handler))
+
+    async def close(self) -> None:
+        self.closed += 1
 
 
 class FakePage:
@@ -89,14 +93,47 @@ def test_page_limit_enforced() -> None:
     assert getattr(excinfo.value, "error_code", None) == "resource_limit"
 
 
-def test_idle_contexts_are_pruned() -> None:
+@pytest.mark.asyncio
+async def test_stale_contexts_are_closed_and_removed() -> None:
     app = BrowserPuppetApp()
     context, _ = make_context(app)
     context.last_used_at = 0
-    app.idle_timeout_seconds = 1
+    app.stale_context_timeout_seconds = 1
 
-    app._prune_idle_contexts()
+    closed = await app._close_stale_contexts(respect_auto_close=False)
 
+    assert closed[0]["context_id"] == "context-1"
+    assert "context-1" not in app.state.contexts
+    assert context.playwright_context.closed == 1
+
+
+@pytest.mark.asyncio
+async def test_persistent_contexts_are_skipped_by_stale_cleanup() -> None:
+    app = BrowserPuppetApp()
+    context, _ = make_context(app)
+    context.last_used_at = 0
+    context.config["persistent_context"] = True
+    app.stale_context_timeout_seconds = 1
+
+    closed = await app._close_stale_contexts(respect_auto_close=False)
+
+    assert closed == []
+    assert "context-1" in app.state.contexts
+    assert context.playwright_context.closed == 0
+
+
+@pytest.mark.asyncio
+async def test_manual_stale_cleanup_ignores_global_auto_close_disable() -> None:
+    app = BrowserPuppetApp()
+    context, _ = make_context(app)
+    context.last_used_at = 0
+    app.stale_context_timeout_seconds = 1
+    app.auto_close_stale_contexts = False
+
+    result = await app.close_stale_contexts()
+
+    assert result["closed_count"] == 1
+    assert result["auto_close_enabled"] is False
     assert "context-1" not in app.state.contexts
 
 

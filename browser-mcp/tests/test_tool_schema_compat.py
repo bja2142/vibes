@@ -119,7 +119,65 @@ async def test_create_context_passes_explicit_headless_mode(monkeypatch: pytest.
     result = await server.APP.create_context("chromium", {"headless": True})
 
     assert result["context_id"].startswith("context-")
-    assert ensure_browser.await_args.kwargs == {"headless": True}
+    assert ensure_browser.await_args.kwargs == {"headless": True, "treat_insecure_origins_as_secure": ()}
+
+
+@pytest.mark.asyncio
+async def test_create_context_passes_insecure_origins_to_ensure_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeBrowser:
+        version = "145.0.0.0"
+
+        async def new_context(self, **kwargs):
+            class FakeContext:
+                async def add_init_script(self, script):
+                    return None
+
+                def on(self, event, handler):
+                    return None
+
+            return FakeContext()
+
+    ensure_browser = AsyncMock(return_value=FakeBrowser())
+    refresh_routes = AsyncMock(return_value=None)
+    monkeypatch.setattr(server.APP, "ensure_browser", ensure_browser)
+    monkeypatch.setattr(server.APP, "_refresh_context_routes", refresh_routes)
+
+    result = await server.APP.create_context(
+        "chromium",
+        {"treat_insecure_origins_as_secure": ["http://10.0.2.15:3000/"]},
+    )
+
+    assert result["effective_config"]["treat_insecure_origins_as_secure"] == ["http://10.0.2.15:3000"]
+    assert ensure_browser.await_args.kwargs == {
+        "headless": False,
+        "treat_insecure_origins_as_secure": ("http://10.0.2.15:3000",),
+    }
+
+
+@pytest.mark.asyncio
+async def test_create_context_preserves_persistent_context_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeBrowser:
+        version = "145.0.0.0"
+
+        async def new_context(self, **kwargs):
+            class FakeContext:
+                async def add_init_script(self, script):
+                    return None
+
+                def on(self, event, handler):
+                    return None
+
+            return FakeContext()
+
+    ensure_browser = AsyncMock(return_value=FakeBrowser())
+    refresh_routes = AsyncMock(return_value=None)
+    monkeypatch.setattr(server.APP, "ensure_browser", ensure_browser)
+    monkeypatch.setattr(server.APP, "_refresh_context_routes", refresh_routes)
+    monkeypatch.setattr(server.APP, "_close_stale_contexts", AsyncMock(return_value=[]))
+
+    result = await server.APP.create_context("chromium", {"persistent_context": True})
+
+    assert result["effective_config"]["persistent_context"] is True
 
 
 @pytest.mark.asyncio

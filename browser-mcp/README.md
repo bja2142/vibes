@@ -56,6 +56,14 @@ Transient internal tool retry:
 - configure it with `--transient-retry-delay-ms`
 - the same setting can be provided with `BROWSER_PUPPET_TRANSIENT_RETRY_DELAY_MS`
 
+Stale context cleanup:
+
+- the server auto-closes stale browser contexts by default after `3600` seconds of inactivity
+- disable server-wide auto-close with `BROWSER_PUPPET_AUTO_CLOSE_STALE_CONTEXTS=false`
+- change the stale timeout with `BROWSER_PUPPET_STALE_CONTEXT_TIMEOUT_SECONDS`
+- set `persistent_context: true` in the `create_context` profile to exempt a context from stale cleanup
+- use `set_context_persistence` later if you need to toggle persistence on an existing context
+
 ## Docker
 
 ```bash

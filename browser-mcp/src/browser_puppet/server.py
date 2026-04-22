@@ -28,10 +28,13 @@ from pydantic import ConfigDict, model_validator
 from playwright.async_api import Browser, BrowserContext, ElementHandle, Frame, Locator, Page, async_playwright
 
 from .config import (
+    DEFAULT_AUTO_CLOSE_STALE_CONTEXTS,
     DEFAULT_ALLOW_LOCAL_NETWORK,
+    DEFAULT_MAX_CONTEXTS,
     DEFAULT_NAVIGATION_TIMEOUT_MS,
     DEFAULT_SSE_HOST,
     DEFAULT_SSE_PORT,
+    DEFAULT_STALE_CONTEXT_TIMEOUT_SECONDS,
     DEFAULT_TEXT_TRANSFER_MAX_BYTES,
     DEFAULT_TIMEOUT_MS,
     DEFAULT_TRANSIENT_RETRY_DELAY_MS,
@@ -508,17 +511,30 @@ enable_legacy_initialization_compatibility()
 class BrowserPuppetApp:
     def __init__(self) -> None:
         self.state = ServerState(artifacts_root=ensure_dir(get_default_artifact_dir()))
-        self.max_contexts = 5
+        self.max_contexts = DEFAULT_MAX_CONTEXTS
         self.max_pages_per_context = 20
-        self.idle_timeout_seconds = 900
+        self.auto_close_stale_contexts = DEFAULT_AUTO_CLOSE_STALE_CONTEXTS
+        self.stale_context_timeout_seconds = DEFAULT_STALE_CONTEXT_TIMEOUT_SECONDS
         self.transient_retry_delay_ms = DEFAULT_TRANSIENT_RETRY_DELAY_MS
         self.allow_local_network_by_default = DEFAULT_ALLOW_LOCAL_NETWORK
+        self._stale_context_reaper_task: asyncio.Task[None] | None = None
+        self._stale_context_cleanup_lock: asyncio.Lock | None = None
 
     async def start(self) -> None:
         if self.state.playwright is None:
             self.state.playwright = await async_playwright().start()
+        if self._stale_context_reaper_task is None or self._stale_context_reaper_task.done():
+            self._stale_context_reaper_task = asyncio.create_task(
+                self._run_stale_context_reaper(),
+                name="browser-puppet-stale-context-reaper",
+            )
 
     async def stop(self) -> None:
+        if self._stale_context_reaper_task is not None:
+            self._stale_context_reaper_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._stale_context_reaper_task
+            self._stale_context_reaper_task = None
         for context_id in list(self.state.contexts):
             await self.close_context(context_id)
         if self.state.playwright is not None:
@@ -526,12 +542,66 @@ class BrowserPuppetApp:
             self.state.playwright = None
 
     @staticmethod
-    def _browser_pool_key(browser_name: str, headless: bool) -> tuple[str, bool]:
-        return browser_name, headless
+    def _browser_pool_key(browser_name: str, headless: bool, treat_insecure_origins_as_secure: tuple[str, ...] = ()) -> tuple[str, bool, tuple[str, ...]]:
+        return browser_name, headless, treat_insecure_origins_as_secure
 
-    async def ensure_browser(self, browser_name: str, *, headless: bool = False) -> Browser:
+    def _normalize_insecure_origins_as_secure(self, origins: Any) -> tuple[str, ...]:
+        if origins is None:
+            return ()
+        if isinstance(origins, str):
+            raw_items = [origins]
+        elif isinstance(origins, (list, tuple, set)):
+            raw_items = list(origins)
+        else:
+            raise SemanticError(
+                "invalid_origin_list",
+                "treat_insecure_origins_as_secure must be a string or list of origin strings.",
+                target={"value": safe_json(origins)},
+            )
+        normalized: list[str] = []
+        for item in raw_items:
+            if not isinstance(item, str):
+                raise SemanticError(
+                    "invalid_origin",
+                    "Each insecure origin must be a string.",
+                    target={"value": safe_json(item)},
+                )
+            value = item.strip()
+            if not value:
+                continue
+            parsed = urlparse(value)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                raise SemanticError(
+                    "invalid_origin",
+                    f"Invalid origin '{item}'. Expected http(s)://host[:port].",
+                    target={"origin": item},
+                )
+            try:
+                port = parsed.port
+            except ValueError as exc:
+                raise SemanticError(
+                    "invalid_origin",
+                    f"Invalid origin '{item}': {exc}.",
+                    target={"origin": item},
+                ) from exc
+            host = parsed.hostname
+            assert host is not None
+            if ":" in host and not host.startswith("["):
+                host = f"[{host}]"
+            default_port = 443 if parsed.scheme == "https" else 80
+            netloc = f"{host}:{port}" if port and port != default_port else host
+            normalized.append(urlunparse((parsed.scheme, netloc, "", "", "", "")))
+        return tuple(sorted(set(normalized)))
+
+    async def ensure_browser(
+        self,
+        browser_name: str,
+        *,
+        headless: bool = False,
+        treat_insecure_origins_as_secure: tuple[str, ...] = (),
+    ) -> Browser:
         await self.start()
-        pool_key = self._browser_pool_key(browser_name, headless)
+        pool_key = self._browser_pool_key(browser_name, headless, treat_insecure_origins_as_secure)
         browser = self.state.browser_pool.get(pool_key)
         if browser is not None:
             return browser
@@ -542,11 +612,15 @@ class BrowserPuppetApp:
             launch_kwargs["args"] = [
                 "--disable-blink-features=AutomationControlled",
             ]
+            if treat_insecure_origins_as_secure:
+                launch_kwargs["args"].append(
+                    "--unsafely-treat-insecure-origin-as-secure=" + ",".join(treat_insecure_origins_as_secure)
+                )
         browser = await browser_type.launch(**launch_kwargs)
         self.state.browser_pool[pool_key] = browser
         return browser
 
-    def get_context(self, context_id: str) -> ContextState:
+    def _get_context_record(self, context_id: str) -> ContextState:
         context = self.state.contexts.get(context_id)
         if context is None:
             raise SemanticError(
@@ -555,14 +629,24 @@ class BrowserPuppetApp:
                 target={"context_id": context_id},
                 next_steps=["create_context"],
             )
+        return context
+
+    def _touch_context(self, context: ContextState) -> None:
         context.last_used_at = utc_ts()
+
+    def _context_is_persistent(self, context: ContextState) -> bool:
+        return bool(context.config.get("persistent_context", False))
+
+    def get_context(self, context_id: str) -> ContextState:
+        context = self._get_context_record(context_id)
+        self._touch_context(context)
         return context
 
     def get_page_state(self, page_id: str) -> PageState:
         for context in self.state.contexts.values():
             page_state = context.pages.get(page_id)
             if page_state is not None:
-                context.last_used_at = utc_ts()
+                self._touch_context(context)
                 return page_state
         raise SemanticError(
             "page_not_found",
@@ -572,7 +656,7 @@ class BrowserPuppetApp:
         )
 
     async def register_page(self, context: ContextState, page: Page) -> PageState:
-        self._prune_idle_contexts()
+        await self._close_stale_contexts(exclude_context_ids={context.context_id})
         self._check_page_limit(context)
         page_id = new_id("page")
         page_state = PageState(page_id=page_id, context_id=context.context_id, playwright_page=page)
@@ -623,18 +707,107 @@ class BrowserPuppetApp:
         except Exception:
             pass
 
-    def _prune_idle_contexts(self) -> None:
-        now = utc_ts()
-        expired = [
-            context_id
-            for context_id, context in self.state.contexts.items()
-            if now - context.last_used_at > self.idle_timeout_seconds
-        ]
-        for context_id in expired:
-            self.state.contexts.pop(context_id, None)
+    def _stale_context_cleanup_lock_instance(self) -> asyncio.Lock:
+        if self._stale_context_cleanup_lock is None:
+            self._stale_context_cleanup_lock = asyncio.Lock()
+        return self._stale_context_cleanup_lock
+
+    def _stale_context_reaper_interval_seconds(self) -> float:
+        timeout = max(1, self.stale_context_timeout_seconds)
+        return min(60.0, max(5.0, timeout / 6))
+
+    def _stale_context_candidates(
+        self,
+        *,
+        now: float | None = None,
+        exclude_context_ids: set[str] | None = None,
+        respect_auto_close: bool = True,
+    ) -> list[dict[str, Any]]:
+        if respect_auto_close and not self.auto_close_stale_contexts:
+            return []
+        now = utc_ts() if now is None else now
+        exclude = exclude_context_ids or set()
+        timeout = max(1, self.stale_context_timeout_seconds)
+        candidates = []
+        for context in self.state.contexts.values():
+            if context.context_id in exclude:
+                continue
+            if self._context_is_persistent(context):
+                continue
+            idle_seconds = now - context.last_used_at
+            if idle_seconds <= timeout:
+                continue
+            candidates.append(
+                {
+                    "context_id": context.context_id,
+                    "idle_seconds": round(idle_seconds, 2),
+                }
+            )
+        return candidates
+
+    async def _run_stale_context_reaper(self) -> None:
+        while True:
+            await asyncio.sleep(self._stale_context_reaper_interval_seconds())
+            try:
+                closed = await self._close_stale_contexts()
+                if closed:
+                    LOGGER.info("stale_context_reaper_closed count=%s", len(closed))
+            except Exception:
+                LOGGER.exception("stale_context_reaper_cycle_failed")
+
+    async def _close_context_record(self, context: ContextState, *, reason: str) -> dict[str, Any]:
+        closed_page_ids = list(context.pages)
+        for page_state in list(context.pages.values()):
+            await self._collect_page_video_artifact(context, page_state)
+        with suppress(Exception):
+            await context.playwright_context.close()
+        context.pages.clear()
+        context.active_page_id = None
+        self.state.contexts.pop(context.context_id, None)
+        if self.state.current_page_id in closed_page_ids:
+            self.state.current_page_id = next(
+                (item.active_page_id for item in self.state.contexts.values() if item.active_page_id),
+                None,
+            )
+        return {
+            "context_id": context.context_id,
+            "closed_page_count": len(closed_page_ids),
+            "reason": reason,
+        }
+
+    async def _close_stale_contexts(
+        self,
+        *,
+        exclude_context_ids: set[str] | None = None,
+        respect_auto_close: bool = True,
+    ) -> list[dict[str, Any]]:
+        candidates = self._stale_context_candidates(
+            exclude_context_ids=exclude_context_ids,
+            respect_auto_close=respect_auto_close,
+        )
+        if not candidates:
+            return []
+        async with self._stale_context_cleanup_lock_instance():
+            candidates = self._stale_context_candidates(
+                exclude_context_ids=exclude_context_ids,
+                respect_auto_close=respect_auto_close,
+            )
+            closed = []
+            for item in candidates:
+                context = self.state.contexts.get(item["context_id"])
+                if context is None:
+                    continue
+                result = await self._close_context_record(context, reason="stale_timeout")
+                result["idle_seconds"] = item["idle_seconds"]
+                closed.append(result)
+                LOGGER.info(
+                    "stale_context_closed context_id=%s idle_seconds=%s",
+                    item["context_id"],
+                    item["idle_seconds"],
+                )
+            return closed
 
     def _check_context_limit(self) -> None:
-        self._prune_idle_contexts()
         if len(self.state.contexts) >= self.max_contexts:
             raise SemanticError(
                 "resource_limit",
@@ -1725,6 +1898,17 @@ class BrowserPuppetApp:
     async def create_context(self, browser: str, profile: dict[str, Any] | None = None) -> dict[str, Any]:
         profile = dict(self._merge_profile_preset(browser, profile or {}))
         profile.setdefault("allow_local_network", self.allow_local_network_by_default)
+        profile["persistent_context"] = bool(profile.get("persistent_context", False))
+        insecure_origins = self._normalize_insecure_origins_as_secure(profile.get("treat_insecure_origins_as_secure"))
+        if insecure_origins:
+            if browser != "chromium":
+                raise SemanticError(
+                    "unsupported_browser",
+                    "treat_insecure_origins_as_secure is only supported for Chromium contexts.",
+                    target={"browser": browser},
+                )
+            profile["treat_insecure_origins_as_secure"] = list(insecure_origins)
+        await self._close_stale_contexts()
         self._check_context_limit()
         ca_bundle = profile.get("ca_bundle_path")
         if ca_bundle is not None and not Path(ca_bundle).exists():
@@ -1733,7 +1917,11 @@ class BrowserPuppetApp:
                 f"CA bundle path '{ca_bundle}' does not exist.",
                 target={"ca_bundle_path": ca_bundle},
             )
-        browser_instance = await self.ensure_browser(browser, headless=bool(profile.get("headless", False)))
+        browser_instance = await self.ensure_browser(
+            browser,
+            headless=bool(profile.get("headless", False)),
+            treat_insecure_origins_as_secure=insecure_origins,
+        )
         context_id = new_id("context")
         artifact_dir = ensure_dir(self.state.artifacts_root / context_id)
         context_kwargs = self._build_context_kwargs(artifact_dir, profile, browser)
@@ -1775,7 +1963,7 @@ class BrowserPuppetApp:
         return tool_result(
             {
                 "context_id": context_id,
-                "effective_config": safe_json(context_kwargs),
+                "effective_config": safe_json(context_state.config),
                 "profile_summary": profile_summary,
             }
         )
@@ -2008,12 +2196,43 @@ class BrowserPuppetApp:
         return tool_result({"success": True})
 
     async def close_context(self, context_id: str) -> dict[str, Any]:
+        context = self._get_context_record(context_id)
+        result = await self._close_context_record(context, reason="manual")
+        return tool_result({"success": True, **result})
+
+    async def close_stale_contexts(self) -> dict[str, Any]:
+        now = utc_ts()
+        stale_persistent_contexts = [
+            {
+                "context_id": context.context_id,
+                "idle_seconds": round(now - context.last_used_at, 2),
+            }
+            for context in self.state.contexts.values()
+            if self._context_is_persistent(context)
+            and now - context.last_used_at > max(1, self.stale_context_timeout_seconds)
+        ]
+        closed = await self._close_stale_contexts(respect_auto_close=False)
+        return tool_result(
+            {
+                "success": True,
+                "closed_count": len(closed),
+                "closed_contexts": closed,
+                "persistent_contexts_skipped": stale_persistent_contexts,
+                "timeout_seconds": self.stale_context_timeout_seconds,
+                "auto_close_enabled": self.auto_close_stale_contexts,
+            }
+        )
+
+    async def set_context_persistence(self, context_id: str, persistent: bool) -> dict[str, Any]:
         context = self.get_context(context_id)
-        for page_state in list(context.pages.values()):
-            await self._collect_page_video_artifact(context, page_state)
-        await context.playwright_context.close()
-        self.state.contexts.pop(context_id, None)
-        return tool_result({"success": True})
+        context.config["persistent_context"] = bool(persistent)
+        return tool_result(
+            {
+                "success": True,
+                "context_id": context_id,
+                "persistent_context": bool(persistent),
+            }
+        )
 
     async def _collect_page_video_artifact(self, context: ContextState, page_state: PageState) -> list[dict[str, Any]]:
         artifacts = []
@@ -3321,13 +3540,121 @@ class BrowserPuppetApp:
 
     async def clipboard_read(self, page_id: str) -> dict[str, Any]:
         page_state = self.get_page_state(page_id)
-        value = await page_state.playwright_page.evaluate("() => navigator.clipboard.readText()")
-        return tool_result({"text": value})
+        result = await self._run_clipboard_operation(page_state, mode="read")
+        return tool_result({"text": result["text"]})
 
     async def clipboard_write(self, page_id: str, text: str) -> dict[str, Any]:
         page_state = self.get_page_state(page_id)
-        await page_state.playwright_page.evaluate("(value) => navigator.clipboard.writeText(value)", self._resolve_input_text(page_state, text))
+        await self._run_clipboard_operation(page_state, mode="write", value=self._resolve_input_text(page_state, text))
         return tool_result({"success": True})
+
+    async def _run_clipboard_operation(self, page_state: PageState, mode: str, value: str | None = None) -> dict[str, Any]:
+        context = self.get_context(page_state.context_id)
+        permission_name = "clipboard-read" if mode == "read" else "clipboard-write"
+        method_name = "readText" if mode == "read" else "writeText"
+        result = await page_state.playwright_page.evaluate(
+            """
+            async ({mode, value, permissionName}) => {
+              const details = {
+                url: typeof location !== 'undefined' ? location.href : null,
+                secure_context: typeof window !== 'undefined' ? !!window.isSecureContext : null,
+                has_clipboard: typeof navigator !== 'undefined' && !!navigator.clipboard,
+                permission_name: permissionName,
+                permission_state: null,
+              };
+              if (navigator.permissions && navigator.permissions.query) {
+                try {
+                  const permission = await navigator.permissions.query({name: permissionName});
+                  details.permission_state = permission.state;
+                } catch (_error) {
+                  details.permission_state = 'unsupported';
+                }
+              }
+              const method = mode === 'read' ? 'readText' : 'writeText';
+              if (!details.has_clipboard || typeof navigator.clipboard[method] !== 'function') {
+                return {ok: false, error_code: 'clipboard_unavailable', ...details};
+              }
+              try {
+                if (mode === 'read') {
+                  return {ok: true, text: await navigator.clipboard.readText(), ...details};
+                }
+                await navigator.clipboard.writeText(value ?? '');
+                return {ok: true, success: true, ...details};
+              } catch (error) {
+                return {
+                  ok: false,
+                  error_code: error && error.name === 'NotAllowedError' ? 'clipboard_access_denied' : 'clipboard_operation_failed',
+                  error_name: error && error.name ? String(error.name) : null,
+                  error_message: error && error.message ? String(error.message) : String(error),
+                  ...details,
+                };
+              }
+            }
+            """,
+            {"mode": mode, "value": value, "permissionName": permission_name},
+        )
+        if result.get("ok"):
+            return result
+        target = {
+            "page_id": page_state.page_id,
+            "browser": context.browser_name,
+            "url": result.get("url") or getattr(page_state.playwright_page, "url", None),
+            "secure_context": result.get("secure_context"),
+            "permission_name": result.get("permission_name"),
+            "permission_state": result.get("permission_state"),
+        }
+        clipboard_next_steps = ["set_permission", "open_page"]
+        target_url = target.get("url")
+        parsed_target_url = urlparse(target_url) if isinstance(target_url, str) else None
+        if (
+            context.browser_name == "chromium"
+            and result.get("secure_context") is False
+            and parsed_target_url is not None
+            and parsed_target_url.scheme == "http"
+        ):
+            clipboard_next_steps = ["set_insecure_origins_as_secure", "open_page", "set_permission"]
+        if result.get("error_code") == "clipboard_unavailable":
+            likely_causes = []
+            if result.get("secure_context") is False:
+                likely_causes.append("the page is not a secure context, so the Async Clipboard API is unavailable")
+                if parsed_target_url is not None and parsed_target_url.scheme == "http" and context.browser_name == "chromium":
+                    likely_causes.append(
+                        "for local non-TLS testing in Chromium, add this origin to treat_insecure_origins_as_secure when creating or updating the context"
+                    )
+            likely_causes.append(f"{context.browser_name} did not expose navigator.clipboard.{method_name} on this page")
+            if result.get("permission_state") not in {None, "unsupported", "granted"}:
+                likely_causes.append(f"{permission_name} permission is currently {result['permission_state']}")
+            raise SemanticError(
+                "clipboard_unavailable",
+                f"Clipboard {mode} is not available on this page because navigator.clipboard.{method_name} is missing.",
+                target=target,
+                likely_causes=likely_causes,
+                next_steps=clipboard_next_steps,
+            )
+        if result.get("error_code") == "clipboard_access_denied":
+            likely_causes = [
+                f"{permission_name} access was blocked by the browser for this page",
+                "some browsers require a secure context, focused page, or explicit permission grant before clipboard access succeeds",
+            ]
+            if result.get("permission_state") not in {None, "unsupported"}:
+                likely_causes.insert(0, f"{permission_name} permission is currently {result['permission_state']}")
+            raise SemanticError(
+                "clipboard_access_denied",
+                f"Clipboard {mode} was denied by the browser: {result.get('error_message') or 'access denied'}.",
+                target=target,
+                likely_causes=likely_causes,
+                next_steps=clipboard_next_steps,
+            )
+        raise SemanticError(
+            "clipboard_operation_failed",
+            (
+                f"Clipboard {mode} failed"
+                + (f": {result['error_message']}" if result.get("error_message") else ".")
+            ),
+            target=target,
+            likely_causes=["the browser rejected the clipboard operation for this page"],
+            next_steps=clipboard_next_steps,
+        )
 
     async def fill_contenteditable(self, html: str, page_id: str | None = None, element_id: str | None = None, target: dict[str, Any] | None = None) -> dict[str, Any]:
         page_state, locator = await self.resolve_locator(page_id=page_id, element_id=element_id, target=target)
@@ -4328,6 +4655,87 @@ class BrowserPuppetApp:
             await runtime.set_geolocation(payload)
         return tool_result({"success": True, "geolocation": payload})
 
+    async def set_insecure_origins_as_secure(self, context_id: str, origins: list[str] | str | None = None) -> dict[str, Any]:
+        context = self.get_context(context_id)
+        if context.browser_name != "chromium":
+            raise SemanticError(
+                "unsupported_browser",
+                "set_insecure_origins_as_secure is only supported for Chromium contexts.",
+                target={"context_id": context_id, "browser": context.browser_name},
+            )
+        normalized = self._normalize_insecure_origins_as_secure(origins or [])
+        current = self._normalize_insecure_origins_as_secure(context.config.get("treat_insecure_origins_as_secure"))
+        if normalized == current:
+            return tool_result(
+                {
+                    "success": True,
+                    "context_id": context_id,
+                    "treat_insecure_origins_as_secure": list(normalized),
+                    "recreated_context": False,
+                    "cleared_pages": 0,
+                }
+            )
+
+        old_page_ids = list(context.pages)
+        if self.state.current_page_id in old_page_ids:
+            self.state.current_page_id = None
+        for page_state in list(context.pages.values()):
+            await self._collect_page_video_artifact(context, page_state)
+        with suppress(Exception):
+            await context.playwright_context.close()
+        context.pages.clear()
+        context.active_page_id = None
+
+        updated_profile = dict(context.config)
+        if normalized:
+            updated_profile["treat_insecure_origins_as_secure"] = list(normalized)
+        else:
+            updated_profile.pop("treat_insecure_origins_as_secure", None)
+        browser_instance = await self.ensure_browser(
+            context.browser_name,
+            headless=bool(updated_profile.get("headless", False)),
+            treat_insecure_origins_as_secure=normalized,
+        )
+        context_kwargs = self._build_context_kwargs(context.artifact_dir, updated_profile, context.browser_name)
+        context.playwright_context = await browser_instance.new_context(**context_kwargs)
+        context.browser = browser_instance
+        context.har_path = context_kwargs.get("record_har_path")
+        context.video_recording_enabled = bool(context_kwargs.get("record_video_dir"))
+        effective_profile = safe_json(updated_profile)
+        effective_profile.update(safe_json(context_kwargs))
+        context.config = effective_profile
+        await context.playwright_context.add_init_script(
+            """
+            (() => {
+              Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined,
+              });
+            })();
+            """
+        )
+        await self._refresh_context_routes(context)
+        context.playwright_context.on(
+            "page",
+            lambda page: asyncio.create_task(self.register_page(context, page)),
+        )
+        granted_permissions = [
+            permission
+            for permission, state in context.config.get("permission_overrides", {}).items()
+            if state == "granted"
+        ]
+        if granted_permissions and hasattr(context.playwright_context, "grant_permissions"):
+            await context.playwright_context.grant_permissions(granted_permissions)
+        return tool_result(
+            {
+                "success": True,
+                "context_id": context_id,
+                "treat_insecure_origins_as_secure": list(normalized),
+                "recreated_context": True,
+                "cleared_pages": len(old_page_ids),
+                "note": "The Playwright context was recreated in place. Existing pages were closed; open a new page for the updated setting to take effect.",
+            }
+        )
+
     async def execute_page_js(self, page_id: str, script: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> dict[str, Any]:
         self._rate_limit("execute_page_js", window_seconds=10, max_calls=20)
         page_state = self.get_page_state(page_id)
@@ -5067,7 +5475,10 @@ def build_network_app(transport: str):
         async with AsyncExitStack() as stack:
             for context in lifespan_contexts:
                 await stack.enter_async_context(context(app))
-            yield
+            try:
+                yield
+            finally:
+                await APP.stop()
 
     app = Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
 
@@ -5169,6 +5580,16 @@ async def _close_page(page_id: str) -> dict[str, Any]:
 @expose("close_context")
 async def _close_context(context_id: str) -> dict[str, Any]:
     return await APP.close_context(context_id)
+
+
+@expose("close_stale_contexts")
+async def _close_stale_contexts() -> dict[str, Any]:
+    return await APP.close_stale_contexts()
+
+
+@expose("set_context_persistence")
+async def _set_context_persistence(context_id: str, persistent: bool) -> dict[str, Any]:
+    return await APP.set_context_persistence(context_id, persistent)
 
 
 @expose("save_storage_state")
@@ -5393,6 +5814,11 @@ async def _get_pending_notifications(page_id: str, cursor: str | None = None, li
 @expose("set_permission")
 async def _set_permission(context_id: str, permission: str, state: str) -> dict[str, Any]:
     return await APP.set_permission(context_id, permission, state)
+
+
+@expose("set_insecure_origins_as_secure")
+async def _set_insecure_origins_as_secure(context_id: str, origins: list[str] | str | None = None) -> dict[str, Any]:
+    return await APP.set_insecure_origins_as_secure(context_id, origins)
 
 
 @expose("update_geolocation")
@@ -5986,10 +6412,30 @@ def main() -> None:
         default=DEFAULT_TRANSIENT_RETRY_DELAY_MS,
         help="Delay before retrying known transient internal tool failures once.",
     )
+    parser.add_argument(
+        "--stale-context-timeout-seconds",
+        type=int,
+        default=DEFAULT_STALE_CONTEXT_TIMEOUT_SECONDS,
+        help="Auto-close non-persistent contexts after this many seconds without access.",
+    )
+    parser.add_argument(
+        "--disable-stale-context-cleanup",
+        action="store_true",
+        help="Disable automatic stale browser-context cleanup.",
+    )
     args = parser.parse_args()
     log_level = configure_logging(args.log_level)
     APP.transient_retry_delay_ms = max(0, args.transient_retry_delay_ms)
-    LOGGER.info("server_start transport=%s host=%s port=%s", args.transport, args.host, args.port)
+    APP.stale_context_timeout_seconds = max(1, args.stale_context_timeout_seconds)
+    APP.auto_close_stale_contexts = not args.disable_stale_context_cleanup
+    LOGGER.info(
+        "server_start transport=%s host=%s port=%s stale_context_cleanup=%s stale_context_timeout_seconds=%s",
+        args.transport,
+        args.host,
+        args.port,
+        APP.auto_close_stale_contexts,
+        APP.stale_context_timeout_seconds,
+    )
     if args.transport == "stdio":
         mcp.run()
         return

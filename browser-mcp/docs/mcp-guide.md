@@ -229,8 +229,9 @@ Use:
 
 - `close_page`
 - `close_context`
+- `close_stale_contexts` when you want an explicit sweep of stale non-persistent contexts
 
-This matters in long-running agent sessions because the server enforces resource limits and idle pruning.
+This matters in long-running agent sessions because the server enforces resource limits and now auto-closes non-persistent contexts after one hour of inactivity by default. If a context must survive that sweep, set `persistent_context: true` in `create_context` or flip it later with `set_context_persistence`.
 
 ## Tool Families
 
@@ -604,6 +605,28 @@ Notes:
 
 - when running in Docker, `localhost` refers to the container, not your host machine
 - for host apps, prefer the host LAN IP or explicit `set_host_overrides` mappings
+
+For Chromium-only local app testing on plain `http://` origins that are not already treated as secure by the browser, you can opt a context into the launch flag below:
+
+```python
+create_context(
+  browser="chromium",
+  profile={
+    "treat_insecure_origins_as_secure": ["http://10.0.2.15:3000"]
+  }
+)
+```
+
+You can also update an existing Chromium context in place:
+
+```python
+set_insecure_origins_as_secure(
+  context_id=context_id,
+  origins=["http://10.0.2.15:3000"]
+)
+```
+
+This recreates the Playwright context under the hood, so existing pages are closed and should be reopened.
 
 ## Headed Browser Default
 
