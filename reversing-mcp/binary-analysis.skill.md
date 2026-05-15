@@ -3,7 +3,7 @@ name: binary-analysis
 description: >
   Binary analysis, reverse engineering, and exploit development using the reversing-mcp
   (static) and pwn-mcp (dynamic) MCP servers. Covers disassembly, decompilation, Ghidra
-  analysis, debugging with GDB, Frida instrumentation, fuzzing with AFL++, exploit
+  analysis, debugging with GDB, Frida instrumentation, exploit
   scripting with pwntools, ROP gadget discovery, constraint solving with Z3, memory
   inspection, heap analysis, string extraction, YARA scanning, code coverage, record/replay
   debugging, seccomp analysis, libc identification, protocol fuzzing, and cross-architecture
@@ -22,7 +22,7 @@ tools:
 You have access to two specialized MCP servers for comprehensive binary analysis:
 
 - **reversing-mcp** (port 6767): Static analysis -- disassembly, decompilation, semantic recovery, signatures, patching
-- **pwn-mcp** (port 6768): Dynamic analysis -- GDB debugging, Frida instrumentation, AFL++ fuzzing, exploit tools, tracing
+- **pwn-mcp** (port 6768): Dynamic analysis -- GDB debugging, Frida instrumentation, exploit tools, symbolic solving, tracing
 
 These servers share a workspace volume. Static analysis results can be exported as JSON manifests and imported into dynamic analysis sessions.
 
@@ -42,7 +42,7 @@ These servers share a workspace volume. Static analysis results can be exported 
 
 ---
 
-## REVERSING-MCP: STATIC ANALYSIS (~82 tools)
+## REVERSING-MCP: STATIC ANALYSIS (98 tools)
 
 ### Result Envelope
 
@@ -258,7 +258,7 @@ These tools reduce token usage and round trips. They share these optional contro
 
 ---
 
-## PWN-MCP: DYNAMIC ANALYSIS (79 tools)
+## PWN-MCP: DYNAMIC ANALYSIS (90 tools)
 
 ### Response Format
 
@@ -354,18 +354,8 @@ These tools reduce token usage and round trips. They share these optional contro
 | Tool | Required Params | Purpose |
 |------|----------------|---------|
 | `run_with_coverage` | `session_id`, `binary_path` | DynamoRIO drcov. Returns `coverage_id`. |
-| `get_coverage_report` | `session_id`, `coverage_id` | Module list + block count. |
-| `diff_coverage` | `session_id`, `coverage_id_a`, `coverage_id_b` | Compare two runs. |
-
-### Fuzzing
-
-| Tool | Required Params | Purpose |
-|------|----------------|---------|
-| `start_afl_session` | `session_id`, `binary_path` | AFL++ QEMU-mode fuzzing. Optional: `input_dir`, `args`, `timeout_seconds`, `qemu_mode`, `extra_flags`. Returns `fuzz_id` + `job_id`. |
-| `get_fuzzer_status` | `session_id`, `fuzz_id` | Stats: exec/sec, paths, crashes, hangs. |
-| `get_crash_inputs` | `session_id`, `fuzz_id` | Crash-triggering inputs. Optional: `max_inputs`. |
-| `stop_fuzzer` | `session_id`, `job_id` | Stop fuzzing campaign. |
-| `minimize_input` | `session_id`, `binary_path`, `input_file` | afl-tmin minimization. |
+| `get_coverage_report` | `session_id`, `coverage_id` | Module list, block count, optional block sample. |
+| `diff_coverage` | `session_id`, `coverage_id_a`, `coverage_id_b` | Compare two runs with new/dropped block samples. |
 
 ### Exploit Tools
 
@@ -390,11 +380,49 @@ These tools reduce token usage and round trips. They share these optional contro
 |------|----------------|---------|
 | `run_z3_script` | `session_id`, `script` | Z3 solver with `from z3 import *` + `_solve_and_print(solver, variables)` pre-imported. Optional: `timeout_seconds`. |
 
+### Symbolic Execution
+
+| Tool | Required Params | Purpose |
+|------|----------------|---------|
+| `run_angr_script` | `session_id`, `script` | angr/claripy/cle script with shared `WORKSPACE` and `OUTPUT_DIR`. Optional: `timeout_seconds`. |
+| `get_angr_project_info` | `session_id`, `binary_path` | angr loader, architecture, entrypoint, object, and symbol summary. |
+| `angr_find_path` | `session_id`, `binary_path`, `find_address` | Solve symbolic stdin to reach an address. Optional: `avoid_address`, `stdin_size`, `timeout_seconds`. |
+
+### Emulation
+
+| Tool | Required Params | Purpose |
+|------|----------------|---------|
+| `emulate_blob_unicorn` | `session_id`, `arch`, `code_hex` | Run raw shellcode/gadget bytes and return final registers. Optional: `start_address`, `registers`, `memory_size`. |
+| `run_qiling_script` | `session_id`, `script` | Qiling script runner with shared workspace/output env vars. Optional: `timeout_seconds`. |
+
+### Assembly and Disassembly
+
+| Tool | Required Params | Purpose |
+|------|----------------|---------|
+| `assemble_code` | `session_id`, `assembly`, `arch` | Assemble snippets with Keystone or NASM. Optional: `syntax`, `base_address`, `backend`. |
+| `disassemble_bytes` | `session_id`, `code_hex`, `arch` | Disassemble bytes with Capstone or rasm2. Optional: `base_address`, `syntax`, `max_instructions`, `backend`. |
+| `disassemble_file_region` | `session_id`, `binary_path`, `offset`, `length`, `arch` | Disassemble a bounded file region. Optional: `base_address`, `max_instructions`. |
+
+### RE Triage
+
+| Tool | Required Params | Purpose |
+|------|----------------|---------|
+| `run_capa` | `session_id`, `binary_path` | FLARE capa capability detection; bundled `/opt/capa-rules` is used by default. Optional: `output_format`, `rules_path`. |
+| `run_floss` | `session_id`, `binary_path` | FLARE FLOSS strings. Defaults to static strings for ELF; use `analysis_types=["all"]` for full PE decoding. |
+| `run_yara_scan` | `session_id`, `target_path` | YARA scan with `rule_source` or `rule_path`. Optional: `show_strings`, `timeout_seconds`. |
+| `run_radare2_command` | `session_id`, `binary_path` | Bounded read-only radare2 commands. Optional: `commands`, `timeout_seconds`. |
+
 ### Protocol Fuzzing
 
 | Tool | Required Params | Purpose |
 |------|----------------|---------|
 | `run_boofuzz_script` | `session_id`, `script` | boofuzz with `from boofuzz import *` pre-imported. Optional: `timeout_seconds`. |
+
+### Diagnostics
+
+| Tool | Required Params | Purpose |
+|------|----------------|---------|
+| `validate_toolchain` | — | Map installed backends to MCP wrappers. Optional: `run_probes`, `timeout_seconds`. |
 
 ### libc Tools
 
@@ -500,20 +528,18 @@ elf = ELF(WORKSPACE + '/challenge')
 """)
 ```
 
-### Vulnerability Research with Fuzzing
+### Vulnerability Research with Coverage And Solving
 
 ```
-# Start fuzzing
 1. create_execution_session()
 2. checksec(session_id, binary_path="target")
-3. start_afl_session(session_id, binary_path="target", timeout_seconds=3600)
-4. get_fuzzer_status(session_id, fuzz_id)  # poll periodically
-5. get_crash_inputs(session_id, fuzz_id)
-6. minimize_input(session_id, binary_path="target", input_file="crash_input")
+3. run_with_coverage(session_id, binary_path="target")
+4. get_coverage_report(session_id, coverage_id)
+5. run_z3_script(session_id, script="...")
 
-# Debug crash
-7. start_debug_session(session_id, binary_path="target")
-8. # ... set breakpoints, run with crash input, inspect state
+# Debug candidate path/input
+6. start_debug_session(session_id, binary_path="target")
+7. # ... set breakpoints, run with candidate input, inspect state
 ```
 
 ### Malware Behavioral Analysis
@@ -645,11 +671,11 @@ Key metrics:
 
 4. **Reanalysis invalidates IDs.** After `start_artifact_reanalysis`, all `function_id` and `string_id` values from the previous generation are invalid. Re-query functions/strings.
 
-5. **Script tools are sandboxed.** `run_pwntools_script`, `run_z3_script`, `run_boofuzz_script` run in subprocess with timeout. They cannot access MCP state directly. Use `WORKSPACE` and `OUTPUT_DIR` env vars for file I/O.
+5. **Script tools are sandboxed.** `run_pwntools_script`, `run_z3_script`, `run_angr_script`, `run_qiling_script`, `run_boofuzz_script` run in subprocess with timeout. They cannot access MCP state directly. Use `WORKSPACE` and `OUTPUT_DIR` env vars for file I/O.
 
 6. **Memory dump size limit.** `dump_memory` (Frida) maxes at 64KB. For larger dumps, make multiple calls.
 
-7. **AFL++ needs seed input.** If no `input_dir` is provided, a minimal default seed is created. Better seeds = better fuzzing.
+7. **AFL++ is intentionally out of scope.** This CTF harness keeps Z3 symbolic solving, Frida, coverage, and boofuzz protocol scripts, but does not install or expose AFL++.
 
 8. **Partial results.** Extraction and carving may return `"partial": true` when hitting byte/artifact/recursion limits. Always check this field.
 

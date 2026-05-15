@@ -17,6 +17,23 @@ if TYPE_CHECKING:
 
 # ── Tool handlers ─────────────────────────────────────────────────────────────
 
+def _resolve_manifest_path(app: "PwnMcpApp", manifest_path: str) -> Path:
+    target = Path(manifest_path)
+    if not target.is_absolute():
+        target = app.security.workspace_root / manifest_path
+    resolved = target.resolve()
+    app.security._require_within(resolved, app.security.workspace_root, "Manifest")
+    if not resolved.exists():
+        raise PwnMcpError("not_found", "manifest_not_found", f"Manifest file not found: {resolved}")
+    if not resolved.is_file():
+        raise PwnMcpError(
+            "invalid_request",
+            "manifest_path_not_regular_file",
+            f"Manifest path '{resolved}' is not a regular file.",
+            details={"path": str(resolved)},
+        )
+    return resolved
+
 def import_static_analysis(
     app: "PwnMcpApp",
     session_id: str,
@@ -27,11 +44,7 @@ def import_static_analysis(
     if session is None:
         raise PwnMcpError("not_found", "session_not_found", f"Session '{session_id}' not found.")
 
-    target = Path(manifest_path)
-    if not target.is_absolute():
-        target = app.security.workspace_root / manifest_path
-    if not target.exists():
-        raise PwnMcpError("not_found", "manifest_not_found", f"Manifest file not found: {target}")
+    target = _resolve_manifest_path(app, manifest_path)
 
     try:
         manifest = json.loads(target.read_text())
@@ -76,11 +89,7 @@ def auto_set_breakpoints(
     if debug_session is None:
         raise PwnMcpError("not_found", "debug_session_not_found", f"Debug session '{debug_id}' not found.")
 
-    target = Path(manifest_path)
-    if not target.is_absolute():
-        target = app.security.workspace_root / manifest_path
-    if not target.exists():
-        raise PwnMcpError("not_found", "manifest_not_found", f"Manifest file not found: {target}")
+    target = _resolve_manifest_path(app, manifest_path)
 
     manifest = json.loads(target.read_text())
     functions = manifest.get("functions", [])

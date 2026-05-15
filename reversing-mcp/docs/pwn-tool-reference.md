@@ -1,6 +1,6 @@
 # PWN-MCP Tool Reference
 
-Complete reference for all 79 tools in the `pwn-mcp` dynamic analysis server. Tools are grouped by function.
+Complete reference for all 90 tools in the `pwn-mcp` dynamic analysis server. Tools are grouped by function.
 
 ## Session Management
 
@@ -114,6 +114,10 @@ Write bytes to the inferior's address space.
 
 Search the inferior's memory for a byte pattern.
 
+### `dump_memory_region(session_id, debug_id, address, length, output_filename?)`
+
+Dump a bounded region of inferior memory into the session output directory. The output path is returned and remains under `PWN_MCP_OUTPUT_ROOT`.
+
 ### `get_backtrace(session_id, debug_id, limit?)`
 
 Get the call stack at the current position.
@@ -133,6 +137,14 @@ Show memory maps (segments, permissions, file mappings) of the running process.
 ### `get_heap_info(session_id, debug_id)`
 
 Inspect heap structure using GEF or pwndbg heap commands. Shows bins, chunks, and tcache state.
+
+### `analyze_heap(session_id, debug_id)`
+
+Run framework-aware heap inspection commands and return raw command output, allocator inference for ptmalloc2/jemalloc/tcmalloc, and a compact summary for heap, tcache, fastbin, and chunk mentions.
+
+### `find_format_string_vulns(session_id, binary_path, max_findings?)`
+
+Heuristically scan a binary for printf-family format-string attack surface. Findings identify sink calls and format-string literals; confirm attacker control dynamically before treating a hit as exploitable.
 
 ### `get_libc_info(session_id, debug_id)`
 
@@ -234,33 +246,11 @@ Run a binary under DynamoRIO to collect basic-block code coverage (drcov format)
 
 ### `get_coverage_report(session_id, coverage_id)`
 
-Parse a drcov coverage log and return module list and block count.
+Parse a drcov coverage log and return module list, block count, and optionally sampled basic block identities.
 
 ### `diff_coverage(session_id, coverage_id_a, coverage_id_b)`
 
-Compare two coverage runs and report block-count delta.
-
-## Fuzzing
-
-### `start_afl_session(session_id, binary_path, input_dir?, args?, timeout_seconds?, extra_flags?)`
-
-Start AFL++ coverage-guided fuzzing in QEMU mode (no source needed). Runs as a background job.
-
-### `get_fuzzer_status(session_id, fuzzer_id)`
-
-Get AFL++ fuzzer stats (executions/sec, paths found, crashes, hangs).
-
-### `get_crash_inputs(session_id, fuzzer_id)`
-
-Retrieve crash-triggering inputs from an AFL++ session.
-
-### `stop_fuzzer(session_id, fuzzer_id)`
-
-Cancel a running AFL++ fuzzing job.
-
-### `minimize_input(session_id, binary_path, input_path, timeout_seconds?)`
-
-Minimize a crash-triggering input using `afl-tmin`.
+Compare two coverage runs and report new/dropped drcov basic blocks where block data is available.
 
 ## Exploit Tools
 
@@ -292,13 +282,69 @@ Search for ROP gadgets in a binary using ropper or ROPgadget.
 
 ### `analyze_seccomp(session_id, binary_path, args?)`
 
-Dump and disassemble seccomp BPF filters installed by a binary. Shows which syscalls are allowed/blocked.
+Dump and disassemble seccomp BPF filters installed by a binary. Returns raw output plus parsed syscall/action summaries and sandbox archetype hints.
 
 ## Constraint Solving
 
 ### `run_z3_script(session_id, script, timeout_seconds?)`
 
 Run a Z3 constraint solver script. `from z3 import *` is pre-imported along with a `_solve_and_print()` helper. Use for solving buffer overflow offsets, checksum constraints, custom XOR transformations, angr-style path constraints, etc.
+
+## Symbolic Execution
+
+### `run_angr_script(session_id, script, timeout_seconds?)`
+
+Run a Python script with `angr`, `claripy`, and `cle` pre-imported. `WORKSPACE` and `OUTPUT_DIR` point at the shared workspace and per-session output directory.
+
+### `get_angr_project_info(session_id, binary_path)`
+
+Load a workspace binary in angr and report architecture, bitness, entrypoint, loader objects, and symbol/function hints.
+
+### `angr_find_path(session_id, binary_path, find_address, avoid_address?, stdin_size?, timeout_seconds?)`
+
+Use angr to solve symbolic stdin bytes that reach a target address, optionally avoiding an address. Returns parsed stdin as hex and printable ASCII when a path is found.
+
+## Emulation
+
+### `emulate_blob_unicorn(session_id, arch, code_hex, start_address?, registers?, memory_size?, timeout_seconds?)`
+
+Run raw instruction bytes under Unicorn for quick shellcode and gadget behavior checks. Returns final registers, execution metadata, and any emulator error.
+
+### `run_qiling_script(session_id, script, timeout_seconds?)`
+
+Run a Python script with Qiling pre-imported for OS-aware emulation workflows. `WORKSPACE` and `OUTPUT_DIR` are available.
+
+## Assembly and Disassembly
+
+### `assemble_code(session_id, assembly, arch, syntax?, base_address?, backend?)`
+
+Assemble short snippets using Keystone or NASM. Returns bytes as hex and the backend used.
+
+### `disassemble_bytes(session_id, code_hex, arch, base_address?, syntax?, max_instructions?, backend?)`
+
+Disassemble raw bytes with Capstone or rasm2 and return structured instruction records.
+
+### `disassemble_file_region(session_id, binary_path, offset, length, arch, base_address?, max_instructions?)`
+
+Read a bounded region from a workspace file and disassemble it.
+
+## Reverse-Engineering Triage
+
+### `run_capa(session_id, binary_path, output_format?, rules_path?, timeout_seconds?)`
+
+Run FLARE capa. The container bundles `/opt/capa-rules` and the wrapper passes it automatically unless `rules_path` is provided.
+
+### `run_floss(session_id, binary_path, output_format?, analysis_types?, timeout_seconds?)`
+
+Run FLARE FLOSS. Defaults to `analysis_types=["static"]` so ELF CTF binaries work; pass `["all"]` for full PE decoding.
+
+### `run_yara_scan(session_id, target_path, rule_source?, rule_path?, show_strings?, timeout_seconds?)`
+
+Run YARA against a workspace file with inline rule source or a workspace rule file.
+
+### `run_radare2_command(session_id, binary_path, commands?, timeout_seconds?)`
+
+Run bounded read-only radare2 commands such as `ij`, `iSj`, and `aflj` against a workspace binary.
 
 ## Protocol Fuzzing
 
@@ -334,7 +380,7 @@ Get current ELF interpreter, rpath, and needed libraries for a binary using patc
 
 Import a static analysis manifest exported by reversing-mcp (`export_dynamic_manifest`). Returns functions, strings, and imports with addresses.
 
-### `auto_set_breakpoints(session_id, debug_id, manifest_path, filter_pattern?)`
+### `auto_set_breakpoints(session_id, debug_id, manifest_path, filter_names?)`
 
 Import a reversing-mcp manifest and auto-set GDB breakpoints on all (or filtered) functions in an active debug session.
 
@@ -342,7 +388,7 @@ Import a reversing-mcp manifest and auto-set GDB breakpoints on all (or filtered
 
 ### `get_job(session_id, job_id)`
 
-Get the status and result of an async job (e.g. fuzzing).
+Get the status and result of an async job.
 
 ### `cancel_job(session_id, job_id)`
 
@@ -351,6 +397,12 @@ Cancel a running async job.
 ### `list_jobs(session_id, status?)`
 
 List all jobs for a given session.
+
+## Diagnostics
+
+### `validate_toolchain(run_probes?, timeout_seconds?)`
+
+Report installed backend availability and the MCP tools that expose each backend. With `run_probes=true`, run lightweight version probes for CLI tools.
 
 ## Supported Architectures
 
@@ -374,6 +426,7 @@ Non-native binaries are automatically detected via ELF header inspection and exe
 - All tools require a `session_id` from `create_execution_session`
 - GDB tools require a `debug_id` from `start_debug_session` or `start_rr_replay`
 - Frida tools require a `frida_id` from `start_frida_session`
-- Script tools (`run_pwntools_script`, `run_z3_script`, `run_boofuzz_script`) execute in isolated subprocesses with configurable timeouts
-- AFL++ fuzzing runs as background jobs — use `get_fuzzer_status` to monitor
+- Script tools (`run_pwntools_script`, `run_z3_script`, `run_angr_script`, `run_qiling_script`, `run_boofuzz_script`) execute in isolated subprocesses with configurable timeouts
+- `validate_toolchain` maps installed external tools and Python packages to their MCP wrappers
+- capa uses bundled `/opt/capa-rules` by default because the PyPI package does not include rules
 - rr recording requires x86/x86_64 and `perf_event_paranoid <= 1`

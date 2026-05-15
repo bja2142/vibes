@@ -1,6 +1,6 @@
 # pwn-mcp -- Dynamic Analysis MCP Server
 
-Companion to `reversing-mcp`. Provides 79 dynamic analysis tools for reverse engineering, vulnerability research, exploit development, and CTF challenge solving.
+Companion to `reversing-mcp`. Provides 90 dynamic analysis tools for reverse engineering, vulnerability research, exploit development, and CTF challenge solving.
 
 ## Architecture
 
@@ -9,19 +9,19 @@ Two separate MCP servers sharing a workspace volume:
 | Server | Port | Purpose | Execution |
 |---|---|---|---|
 | `reversing-mcp` | 6767 | Static analysis (disassembly, decompilation, strings, signatures) | None -- sandboxed parser |
-| `pwn-mcp` | 6768 | Dynamic analysis (GDB, Frida, AFL++, rr, tracing, exploitation) | Required -- binaries run |
+| `pwn-mcp` | 6768 | Dynamic analysis (GDB, Frida, rr, tracing, solving, exploitation) | Required -- binaries run |
 
 ## Transport
 
-Serves MCP over SSE (`GET /sse`) and streamable HTTP (`POST /sse`) at port `6768`.
+Serves MCP over streamable HTTP at `/mcp` on port `6768`. SSE is still available at `/sse` when launched with `--transport sse` or `--transport both`; the original `POST /sse` streamable HTTP route is preserved for backward compatibility when SSE is enabled, but new container wiring should use `/mcp`.
 
 MCP client configuration:
 
 ```json
 {
   "pwn-mcp": {
-    "type": "sse",
-    "url": "http://127.0.0.1:6768/sse"
+    "type": "http",
+    "url": "http://127.0.0.1:6768/mcp"
   }
 }
 ```
@@ -40,22 +40,22 @@ MCP client configuration:
 
 Non-native binaries are auto-detected via ELF header and transparently executed via `qemu-user-static` + `binfmt_misc`. GDB sessions auto-configure QEMU exec-wrappers.
 
-## Tool Inventory (79 tools)
+## Tool Inventory (90 tools)
 
-### Process Control (5 tools)
+### Process Control (8 tools)
 - `create_execution_session` / `list_execution_sessions` / `destroy_execution_session` -- session lifecycle
 - `launch_binary` -- run a binary with piped I/O, auto-detects architecture
 - `send_input` / `read_output` / `get_process_state` / `terminate_process` -- process interaction
 
-### GDB Debugging (24 tools)
+### GDB Debugging (27 tools)
 - `start_debug_session` / `stop_debug_session` -- GDB/MI session management
 - `send_gdb_command` -- arbitrary GDB CLI or MI commands
 - `set_breakpoint` / `delete_breakpoint` / `list_breakpoints` -- breakpoint management
 - `continue_execution` / `step_into` / `step_over` / `step_instruction` / `step_over_instruction` / `finish_function` / `run_until` -- execution control
 - `read_registers` / `write_register` -- register access
-- `read_memory` / `write_memory` / `search_memory` -- memory access
+- `read_memory` / `write_memory` / `search_memory` / `dump_memory_region` -- memory access
 - `get_backtrace` / `get_locals` / `evaluate_expression` -- inspection
-- `get_memory_maps` / `get_heap_info` / `get_libc_info` -- process state
+- `get_memory_maps` / `get_heap_info` / `analyze_heap` / `find_format_string_vulns` / `get_libc_info` -- process state and vulnerability triage
 
 ### Frida Instrumentation (8 tools)
 - `start_frida_session` / `stop_frida_session` -- Frida session lifecycle
@@ -79,11 +79,6 @@ Non-native binaries are auto-detected via ELF header and transparently executed 
 - `run_with_coverage` -- DynamoRIO drcov collection
 - `get_coverage_report` / `diff_coverage` -- analysis and comparison
 
-### Fuzzing (5 tools)
-- `start_afl_session` -- AFL++ QEMU-mode fuzzing (no source needed)
-- `get_fuzzer_status` / `get_crash_inputs` / `stop_fuzzer` -- campaign management
-- `minimize_input` -- afl-tmin crash minimization
-
 ### Exploit Tools (6 tools)
 - `checksec` -- binary security properties (RELRO, canary, NX, PIE, FORTIFY)
 - `run_pwntools_script` -- full pwntools scripting (`from pwn import *` pre-imported)
@@ -96,6 +91,26 @@ Non-native binaries are auto-detected via ELF header and transparently executed 
 
 ### Constraint Solving (1 tool)
 - `run_z3_script` -- Z3 solver scripts (`from z3 import *` pre-imported)
+
+### Symbolic Execution (3 tools)
+- `run_angr_script` -- custom angr/claripy scripts with `WORKSPACE` and `OUTPUT_DIR`
+- `get_angr_project_info` -- loader, entrypoint, architecture, and symbol summary
+- `angr_find_path` -- solve stdin bytes that reach a target address
+
+### Emulation (2 tools)
+- `emulate_blob_unicorn` -- execute raw x86/x64/ARM/AArch64/MIPS shellcode snippets
+- `run_qiling_script` -- custom Qiling scripts for OS-aware emulation workflows
+
+### Assembly and Disassembly (3 tools)
+- `assemble_code` -- assemble short snippets with Keystone or NASM
+- `disassemble_bytes` -- decode raw bytes with Capstone or rasm2
+- `disassemble_file_region` -- disassemble bounded file regions
+
+### Reverse-Engineering Triage (4 tools)
+- `run_capa` -- FLARE capa capability detection with bundled `/opt/capa-rules`
+- `run_floss` -- FLARE FLOSS string extraction, defaulting to static strings for ELF compatibility
+- `run_yara_scan` -- scan workspace files with inline or workspace YARA rules
+- `run_radare2_command` -- run bounded read-only radare2 commands
 
 ### Protocol Fuzzing (1 tool)
 - `run_boofuzz_script` -- grammar-based protocol fuzzing (`from boofuzz import *` pre-imported)
@@ -113,6 +128,9 @@ Non-native binaries are auto-detected via ELF header and transparently executed 
 ### Job Management (3 tools)
 - `get_job` / `cancel_job` / `list_jobs` -- async job tracking
 
+### Diagnostics (1 tool)
+- `validate_toolchain` -- map installed backends to MCP tools and optionally run lightweight version probes
+
 ## Quick Start
 
 ```bash
@@ -122,7 +140,7 @@ docker compose up -d reversing-mcp pwn-mcp
 # Run test suite
 docker compose --profile test run pwn-mcp-test
 
-# Fast tests only (no fuzzing)
+# Fast tests only
 docker compose --profile test run pwn-mcp-test python3 -m pytest tests/ -m "not slow" -v
 ```
 
@@ -130,9 +148,9 @@ docker compose --profile test run pwn-mcp-test python3 -m pytest tests/ -m "not 
 
 | Variable | Default | Description |
 |---|---|---|
-| `PWN_MCP_WORKSPACE_ROOT` | `/workspace/binaries` | Binary input directory (read-only mount) |
-| `PWN_MCP_OUTPUT_ROOT` | `/workspace/dynamic-output` | Output for traces, coverage, fuzzing |
-| `PWN_MCP_SESSIONS_ROOT` | `/tmp/pwn-mcp-sessions` | Session working directories |
+| `PWN_MCP_WORKSPACE_ROOT` | `/workspace` | Binary input directory. |
+| `PWN_MCP_OUTPUT_ROOT` | `/workspace/dynamic-output` | Output for traces, coverage, scripts, and dynamic artifacts. |
+| `PWN_MCP_SESSIONS_ROOT` | `/tmp/pwn-mcp-sessions` | Session working directories. The standalone compose file overrides this to `/workspace/dynamic-output/pwn-sessions` so live MCP state is on the writable output volume. |
 | `PWN_MCP_LOG_LEVEL` | `INFO` | Server log level |
 | `PWN_MCP_PORT` | `6768` | Server port |
 | `GDBINIT_FRAMEWORK` | `gef` | GDB enhancement (`gef` or `pwndbg`) |
@@ -145,11 +163,11 @@ docker compose --profile test run pwn-mcp-test python3 -m pytest tests/ -m "not 
 
 ## Security Model
 
-- Runs as non-root user (UID 10002) inside the container
-- Input binaries mounted read-only (`/workspace/binaries:ro`)
+- Runs as a non-root user in Docker.
+- Input binaries are restricted to `PWN_MCP_WORKSPACE_ROOT`.
 - Seccomp profile applied (`pwn-mcp/seccomp/dynamic-analysis.json`)
 - `SYS_PTRACE` is the only added capability
-- Script execution tools (`run_pwntools_script`, `run_z3_script`, `run_boofuzz_script`) run in isolated subprocesses with configurable timeouts
+- Script execution tools (`run_pwntools_script`, `run_z3_script`, `run_angr_script`, `run_qiling_script`, `run_boofuzz_script`) run in isolated subprocesses with configurable timeouts
 
 ## Documentation
 

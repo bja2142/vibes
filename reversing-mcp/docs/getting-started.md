@@ -17,10 +17,10 @@ docker compose up -d --build
 
 Default network endpoints:
 
-- reversing-mcp (static): `http://127.0.0.1:6767/sse`
-- pwn-mcp (dynamic): `http://127.0.0.1:6768/sse`
+- reversing-mcp (static): `http://127.0.0.1:6767/mcp`
+- pwn-mcp (dynamic): `http://127.0.0.1:6768/mcp`
 
-Both servers support SSE and streamable HTTP protocols at the `/sse` endpoint. Streamable HTTP at `/mcp` is also available for reversing-mcp.
+Both servers are wired for streamable HTTP at `/mcp`. SSE compatibility remains available when a server is launched with `--transport sse` or `--transport both`.
 
 Optional HTTP auth and quota environment variables:
 

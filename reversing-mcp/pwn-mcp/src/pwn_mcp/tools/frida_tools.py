@@ -50,6 +50,7 @@ def start_frida_session(
         frida_id=frida_id,
         session_id=session_id,
         target=str(binary),
+        pid=pid,
         device=device,
         session=frida_session,
     )
@@ -350,15 +351,10 @@ def stop_frida_session(
 
     # Kill spawned process
     try:
-        import frida
-        device = frida.get_local_device()
-        # Get PID from device — Frida sessions track it internally
-        # Kill via OS since Frida may not expose it after detach
-        import signal, os
-        # Try to find and kill the process
-        device.kill(fs.session._impl.pid if hasattr(fs.session, '_impl') else 0)
-    except Exception:
-        pass  # Best effort
+        if fs.device is not None and fs.pid is not None:
+            fs.device.kill(fs.pid)
+    except Exception as exc:
+        errors.append(f"Kill: {exc}")
 
     with session._lock:
         del session.frida_sessions[frida_id]

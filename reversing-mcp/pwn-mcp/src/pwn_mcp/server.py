@@ -55,16 +55,23 @@ def _build_server(app: PwnMcpApp) -> Server:
     return server
 
 
-def build_sse_app(app: PwnMcpApp):
+def build_network_app(app: PwnMcpApp, transport: str = "both"):
     """Build a raw ASGI app that serves MCP over SSE and streamable HTTP.
 
     Routes:
       GET  /sse        → SSE transport (event stream)
-      POST /sse        → Streamable HTTP (JSON-RPC over HTTP)
       POST /messages/  → SSE message posting endpoint
+      POST /mcp        → Streamable HTTP (JSON-RPC over HTTP)
+
+    For backward compatibility with the original pwn-mcp container, POST and
+    DELETE to /sse are also accepted as streamable HTTP when SSE is enabled.
     """
     from mcp.server.sse import SseServerTransport
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+
+    normalized = "http" if transport == "streamable-http" else transport
+    if normalized not in {"sse", "http", "both"}:
+        raise ValueError(f"Unsupported network transport '{transport}'.")
 
     sse_transport = SseServerTransport("/messages/")
     http_session_manager = StreamableHTTPSessionManager(
@@ -102,9 +109,10 @@ def build_sse_app(app: PwnMcpApp):
 
         path = scope.get("path", "")
         method = scope.get("method", "GET")
+        route_path = path.rstrip("/") or "/"
 
         # GET /sse → SSE event stream
-        if path.rstrip("/") == "/sse" and method == "GET":
+        if normalized in {"sse", "both"} and route_path == "/sse" and method == "GET":
             server = _build_server(app)
             async with sse_transport.connect_sse(scope, receive, send) as (
                 read_stream,
@@ -117,19 +125,39 @@ def build_sse_app(app: PwnMcpApp):
                 )
             return
 
-        # POST /sse → Streamable HTTP (JSON-RPC)
-        if path.rstrip("/") == "/sse" and method == "POST":
+        # POST/DELETE /mcp → Streamable HTTP (JSON-RPC)
+        if normalized in {"http", "both"} and route_path == "/mcp" and method in {"POST", "DELETE", "GET"}:
             await http_session_manager.handle_request(scope, receive, send)
             return
 
         # POST /messages/ → SSE message posting
-        if "/messages/" in path and method == "POST":
+        if normalized in {"sse", "both"} and "/messages/" in path and method == "POST":
             await sse_transport.handle_post_message(scope, receive, send)
             return
 
-        # DELETE /sse → Streamable HTTP session cleanup
-        if path.rstrip("/") == "/sse" and method == "DELETE":
+        # Backward-compatible streamable HTTP on /sse.
+        if normalized in {"sse", "both"} and route_path == "/sse" and method in {"POST", "DELETE"}:
             await http_session_manager.handle_request(scope, receive, send)
+            return
+
+        if route_path == "/" and method == "GET":
+            endpoints = {}
+            if normalized in {"http", "both"}:
+                endpoints["streamable_http"] = "/mcp"
+            if normalized in {"sse", "both"}:
+                endpoints["sse"] = "/sse"
+            body = json.dumps({
+                "name": SERVER_NAME,
+                "version": SERVER_VERSION,
+                "endpoints": endpoints,
+                "auth": "none",
+            }).encode("utf-8")
+            await send({
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [[b"content-type", b"application/json"], [b"content-length", str(len(body)).encode("ascii")]],
+            })
+            await send({"type": "http.response.body", "body": body})
             return
 
         # 404 for everything else
@@ -146,6 +174,11 @@ def build_sse_app(app: PwnMcpApp):
     return asgi_app
 
 
+def build_sse_app(app: PwnMcpApp):
+    """Backward-compatible wrapper for the original pwn-mcp SSE app builder."""
+    return build_network_app(app, "both")
+
+
 def configure_logging(level_str: str) -> int:
     level = getattr(logging, level_str.upper(), logging.INFO)
     logging.basicConfig(
@@ -157,7 +190,7 @@ def configure_logging(level_str: str) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=f"{SERVER_NAME} v{SERVER_VERSION}")
-    parser.add_argument("--transport", choices=["stdio", "sse"], default="stdio")
+    parser.add_argument("--transport", choices=["stdio", "sse", "http", "streamable-http", "both"], default="stdio")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=6768)
     parser.add_argument("--workspace", default=None, help="Workspace root (overrides PWN_MCP_WORKSPACE_ROOT)")
@@ -184,7 +217,7 @@ def main() -> None:
 
     import uvicorn
 
-    asgi_app = build_sse_app(pwn_app)
+    asgi_app = build_network_app(pwn_app, args.transport)
     uvicorn_level = "debug" if log_level <= logging.DEBUG else logging.getLevelName(log_level).lower()
     uvicorn.run(asgi_app, host=args.host, port=args.port, log_level=uvicorn_level, lifespan="on")
 

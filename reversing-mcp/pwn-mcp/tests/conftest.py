@@ -53,7 +53,7 @@ def binary(name: str) -> str:
 # ── Markers / skip conditions ─────────────────────────────────────────────────
 
 def pytest_configure(config):
-    config.addinivalue_line("markers", "slow: long-running (fuzzing, extended traces)")
+    config.addinivalue_line("markers", "slow: long-running integration probes or extended traces")
     config.addinivalue_line("markers", "requires_rr: needs perf_event_paranoia <= 1")
     config.addinivalue_line("markers", "requires_root: needs root/cap_sys_ptrace")
 

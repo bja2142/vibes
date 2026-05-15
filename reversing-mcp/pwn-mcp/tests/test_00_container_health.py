@@ -16,15 +16,25 @@ REQUIRED_TOOLS = [
     "ltrace",
     "valgrind",
     "uftrace",
-    "afl-fuzz",
     "frida",
     "checksec",
     "ropper",
     "patchelf",
+    "capa",
+    "floss",
+    "yara",
+    "r2",
+    "rabin2",
+    "rasm2",
+    "nasm",
 ]
 
 REQUIRED_TOOLS_RR = ["rr"]
-REQUIRED_PYTHON_IMPORTS = ["pwn", "frida"]
+REQUIRED_PYTHON_IMPORTS = [
+    "pwn", "frida", "z3", "boofuzz",
+    "angr", "claripy", "cle", "unicorn", "qiling",
+    "capstone", "keystone", "yara",
+]
 
 
 @pytest.mark.parametrize("tool", REQUIRED_TOOLS)
@@ -57,9 +67,3 @@ def test_qemu_user_static_present():
     import shutil
     assert shutil.which("qemu-x86_64") or shutil.which("qemu-x86_64-static"), \
         "qemu-x86_64 not found"
-
-
-def test_afl_qemu_mode_present():
-    import pathlib
-    candidates = list(pathlib.Path("/").glob("**/afl-qemu-trace"))
-    assert candidates, "afl-qemu-trace not found — QEMU mode not built"

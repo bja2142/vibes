@@ -121,39 +121,22 @@ RUN set -eux; \
 # Validate
 RUN rr --version
 
-# ── Phase 6: AFL++ with QEMU mode ─────────────────────────────────────────────
-RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
-    && apt-get install -y --no-install-recommends \
-    clang llvm lld \
-    libglib2.0-dev libpixman-1-dev \
-    python3-setuptools meson \
-    ninja-build \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN git clone --depth=1 https://github.com/AFLplusplus/AFLplusplus /opt/AFLplusplus \
-    && cd /opt/AFLplusplus \
-    && make source-only -j$(nproc) \
-    && make install \
-    && cd qemu_mode \
-    && CPU_TARGET=x86_64 ./build_qemu_support.sh \
-    && CPU_TARGET=aarch64 ./build_qemu_support.sh \
-    && CPU_TARGET=mipsel ./build_qemu_support.sh \
-    && CPU_TARGET=riscv64 ./build_qemu_support.sh
-
-ENV PATH="/opt/AFLplusplus:${PATH}"
-
-# Validate
-RUN afl-fuzz --version
-
-# ── Phase 7: exploit toolchain ────────────────────────────────────────────────
+# ── Phase 6: exploit toolchain ────────────────────────────────────────────────
 RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
     && apt-get install -y --no-install-recommends \
     ruby ruby-dev \
     rubygems \
+    cmake \
+    nasm \
+    yara \
+    radare2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Python exploit tools
-RUN pip install --break-system-packages pwntools ropper ROPgadget z3-solver boofuzz
+RUN pip install --break-system-packages --ignore-installed \
+    pwntools ropper ROPgadget==7.6 z3-solver boofuzz \
+    angr unicorn==2.1.4 qiling capstone keystone-engine \
+    flare-capa flare-floss yara-python
 
 # Ruby tools
 RUN gem install one_gadget seccomp-tools --no-document
@@ -169,12 +152,22 @@ RUN git clone --depth=1 https://github.com/matrix1001/glibc-all-in-one /opt/glib
 # libc-database for leak-based identification
 RUN git clone --depth=1 https://github.com/niklasb/libc-database /opt/libc-database
 
+# capa rules for standalone PyPI installs
+RUN git clone --depth=1 https://github.com/mandiant/capa-rules /opt/capa-rules
+
 # Validate
 RUN python3 -c "import pwn; print('pwntools:', pwn.version)" \
+    && python3 -c "import angr, claripy, cle, unicorn, qiling, capstone, keystone, yara; print('ctf imports ok')" \
     && ropper --version \
     && one_gadget --version \
     && checksec --version \
-    && seccomp-tools --version
+    && seccomp-tools --version \
+    && capa --version \
+    && test -d /opt/capa-rules \
+    && floss --version \
+    && yara --version \
+    && r2 -v >/dev/null \
+    && nasm -v
 
 # ── Application ───────────────────────────────────────────────────────────────
 COPY src ./src

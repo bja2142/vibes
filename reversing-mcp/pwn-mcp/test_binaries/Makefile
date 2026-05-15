@@ -5,7 +5,8 @@ CC_RISCV64 = riscv64-linux-gnu-gcc
 
 CFLAGS = -O0 -g -fno-stack-protector -no-pie
 BINS_X86_64  = test_hello_x86_64 test_crash_offset_x86_64 test_heap_x86_64 \
-               test_format_x86_64 test_seccomp_x86_64 test_network_x86_64
+               test_format_x86_64 test_seccomp_x86_64 test_network_x86_64 \
+               test_angr_x86_64
 BINS_AARCH64 = test_hello_aarch64 test_crash_offset_aarch64 test_heap_aarch64
 BINS_MIPSEL  = test_hello_mipsel test_crash_offset_mipsel test_heap_mipsel
 BINS_RISCV64 = test_hello_riscv64 test_crash_offset_riscv64 test_heap_riscv64
@@ -34,6 +35,9 @@ test_seccomp_x86_64: test_seccomp.c
 	$(CC_X86_64) $(CFLAGS) -o $@ $< -lseccomp
 
 test_network_x86_64: test_network.c
+	$(CC_X86_64) $(CFLAGS) -o $@ $<
+
+test_angr_x86_64: test_angr.c
 	$(CC_X86_64) $(CFLAGS) -o $@ $<
 
 # aarch64 targets

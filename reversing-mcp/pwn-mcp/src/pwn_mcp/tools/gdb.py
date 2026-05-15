@@ -15,7 +15,7 @@ from typing import Any, TYPE_CHECKING
 
 from mcp.types import Tool
 
-from ..config import TOOL_GDB, QEMU_USER_MAP
+from ..config import TOOL_GDB, QEMU_USER_MAP, DEFAULT_OUTPUT_MAX_BYTES
 from ..errors import PwnMcpError
 from ..store import DebugSession
 from ..utils import detect_arch, which_tool
@@ -130,6 +130,34 @@ def _get_mi(app: "PwnMcpApp", session_id: str, debug_id: str) -> GdbMiClient:
     if mi is None or not mi.is_alive():
         raise PwnMcpError("process_error", "gdb_not_running", f"GDB process for debug session '{debug_id}' is not running.")
     return mi
+
+
+def _parse_int(value: int | str, *, field: str) -> int:
+    try:
+        if isinstance(value, int):
+            return value
+        return int(str(value).strip(), 0)
+    except (TypeError, ValueError) as exc:
+        raise PwnMcpError("invalid_request", "invalid_integer", f"{field} must be an integer or hex integer string.") from exc
+
+
+def _safe_gdb_path(path: str) -> str:
+    if '"' in path or "\n" in path or "\r" in path:
+        raise PwnMcpError("invalid_request", "path_not_safe_for_gdb", "GDB dump output path may not contain quotes or newlines.")
+    return path
+
+
+def _detect_allocator(text: str) -> dict[str, str]:
+    lowered = text.lower()
+    if "jemalloc" in lowered:
+        return {"name": "jemalloc", "confidence": "high", "evidence": "jemalloc mapping or symbol found"}
+    if "tcmalloc" in lowered or "libtcmalloc" in lowered or "gperftools" in lowered:
+        return {"name": "tcmalloc", "confidence": "high", "evidence": "tcmalloc mapping or symbol found"}
+    if "ptmalloc" in lowered:
+        return {"name": "ptmalloc2", "confidence": "high", "evidence": "ptmalloc symbol or output found"}
+    if "libc.so" in lowered or "glibc" in lowered:
+        return {"name": "ptmalloc2", "confidence": "medium", "evidence": "glibc libc mapping found"}
+    return {"name": "unknown", "confidence": "low", "evidence": "no allocator-specific mapping or symbol found"}
 
 
 # ── Tool handlers ─────────────────────────────────────────────────────────────
@@ -402,6 +430,52 @@ def search_memory(
     return {"ok": True, "result": result}
 
 
+def dump_memory_region(
+    app: "PwnMcpApp",
+    session_id: str,
+    debug_id: str,
+    address: int | str,
+    length: int,
+    output_filename: str | None = None,
+) -> dict[str, Any]:
+    """Dump a bounded memory region from the inferior to the session output directory."""
+    if length <= 0:
+        raise PwnMcpError("invalid_request", "length_invalid", "length must be greater than zero.")
+    if length > DEFAULT_OUTPUT_MAX_BYTES:
+        raise PwnMcpError(
+            "timeout_or_resource_limit",
+            "memory_dump_too_large",
+            f"Memory dumps are capped at {DEFAULT_OUTPUT_MAX_BYTES} bytes.",
+            details={"max_bytes": DEFAULT_OUTPUT_MAX_BYTES, "requested_bytes": length},
+        )
+
+    mi = _get_mi(app, session_id, debug_id)
+    start = _parse_int(address, field="address")
+    end = start + int(length)
+    filename = output_filename or f"memory_{start:#x}_{length}.bin".replace("0x", "")
+    output_path = app.security.resolve_output_file(session_id, filename)
+    safe_path = _safe_gdb_path(str(output_path))
+
+    output = mi.exec_cli(f"dump memory {safe_path} {start:#x} {end:#x}")
+    if not output_path.exists():
+        raise PwnMcpError(
+            "backend_failure",
+            "memory_dump_failed",
+            "GDB did not create the requested memory dump.",
+            details={"gdb_output": output[-2000:] if output else ""},
+        )
+    return {
+        "ok": True,
+        "result": {
+            "path": str(output_path),
+            "address": f"{start:#x}",
+            "end_address": f"{end:#x}",
+            "bytes_written": output_path.stat().st_size,
+            "gdb_output": output,
+        },
+    }
+
+
 def get_backtrace(
     app: "PwnMcpApp",
     session_id: str,
@@ -469,6 +543,150 @@ def get_libc_info(
     mi = _get_mi(app, session_id, debug_id)
     output = mi.exec_cli("info sharedlibrary")
     return {"ok": True, "result": {"shared_libraries": output}}
+
+
+def analyze_heap(
+    app: "PwnMcpApp",
+    session_id: str,
+    debug_id: str,
+) -> dict[str, Any]:
+    """Run the best available heap-inspection commands for the active GDB framework."""
+    mi = _get_mi(app, session_id, debug_id)
+    ds = _get_debug_session(app, session_id, debug_id)
+    if ds.framework == "pwndbg":
+        commands = ["heap", "bins", "vis_heap_chunks"]
+    elif ds.framework == "gef":
+        commands = ["heap chunks", "heap bins", "heap arenas"]
+    else:
+        commands = ["info proc mappings", "info sharedlibrary"]
+
+    for command in ("info proc mappings", "info sharedlibrary"):
+        if command not in commands:
+            commands.append(command)
+
+    outputs: dict[str, str] = {}
+    for command in commands:
+        try:
+            outputs[command] = mi.exec_cli(command)
+        except Exception as exc:
+            outputs[command] = f"ERROR: {exc}"
+    combined = "\n".join(outputs.values()).lower()
+    return {
+        "ok": True,
+        "result": {
+            "framework": ds.framework,
+            "commands": outputs,
+            "allocator": _detect_allocator(combined),
+            "summary": {
+                "mentions_heap": "heap" in combined,
+                "mentions_tcache": "tcache" in combined,
+                "mentions_fastbin": "fastbin" in combined or "fast bin" in combined,
+                "mentions_chunk": "chunk" in combined,
+            },
+        },
+    }
+
+
+def find_format_string_vulns(
+    app: "PwnMcpApp",
+    session_id: str,
+    binary_path: str,
+    max_findings: int = 50,
+) -> dict[str, Any]:
+    """Heuristically identify format-string attack surface in a binary."""
+    app.sessions.get(session_id)
+    binary = app.security.resolve_binary(binary_path)
+    max_findings = max(1, min(int(max_findings or 50), 500))
+    dangerous_sinks = {
+        "printf",
+        "fprintf",
+        "sprintf",
+        "snprintf",
+        "vprintf",
+        "vfprintf",
+        "vsprintf",
+        "vsnprintf",
+        "syslog",
+        "err",
+        "warn",
+    }
+    findings: list[dict[str, Any]] = []
+    evidence: dict[str, Any] = {"objdump_available": False, "strings_available": False}
+
+    if which_tool("objdump"):
+        evidence["objdump_available"] = True
+        completed = subprocess.run(
+            ["objdump", "-d", str(binary)],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        call_re = re.compile(
+            r"^\s*([0-9a-fA-F]+):.*\b(call\w*|bl|blr|jal|jalr|bal|brasl)\b.*<([^>@]+)(?:@[^>]*)?>",
+            re.IGNORECASE,
+        )
+        for line in completed.stdout.splitlines():
+            match = call_re.search(line)
+            if not match:
+                continue
+            sink = match.group(3)
+            if sink in dangerous_sinks:
+                findings.append({
+                    "kind": "format_sink_call",
+                    "sink": sink,
+                    "address": f"0x{int(match.group(1), 16):x}",
+                    "confidence": "medium",
+                    "evidence": line.strip(),
+                    "reason": "Binary calls a printf-family sink. Verify whether the format argument is attacker-controlled.",
+                })
+                if len(findings) >= max_findings:
+                    break
+        evidence["objdump_returncode"] = completed.returncode
+        if completed.stderr:
+            evidence["objdump_stderr_tail"] = completed.stderr[-1000:]
+
+    if len(findings) < max_findings and which_tool("strings"):
+        evidence["strings_available"] = True
+        completed = subprocess.run(
+            ["strings", "-a", str(binary)],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        fmt_re = re.compile(r"%(?:\d+\$)?[#0 +'-]?(?:\*|\d+)?(?:\.(?:\*|\d+))?[hljztL]*[diuoxXfFeEgGaAcspn]")
+        for line in completed.stdout.splitlines():
+            matches = fmt_re.findall(line)
+            if not matches:
+                continue
+            risky = any(item.endswith("n") or item.endswith("p") or item.endswith("x") or item.endswith("s") for item in matches)
+            findings.append({
+                "kind": "format_string_literal",
+                "string": line[:500],
+                "directives": matches[:20],
+                "confidence": "low" if risky else "informational",
+                "reason": "Binary contains format directives; this is context for sink review, not proof of a vulnerability.",
+            })
+            if len(findings) >= max_findings:
+                break
+        evidence["strings_returncode"] = completed.returncode
+        if completed.stderr:
+            evidence["strings_stderr_tail"] = completed.stderr[-1000:]
+
+    return {
+        "ok": True,
+        "result": {
+            "binary_path": str(binary),
+            "finding_count": len(findings),
+            "findings": findings,
+            "evidence": evidence,
+            "limitations": [
+                "This is a heuristic sink and literal scanner.",
+                "Confirm attacker control of the format argument with GDB, tracing, or source review before treating a finding as exploitable.",
+            ],
+        },
+    }
 
 
 def stop_debug_session(
@@ -806,6 +1024,25 @@ def register(app: "PwnMcpApp") -> dict[str, dict]:
                 },
             ),
         },
+        "dump_memory_region": {
+            "handler": _h(dump_memory_region),
+            "schema": Tool(
+                name="dump_memory_region",
+                description="Dump a bounded region of inferior memory to the session output directory.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "session_id": _sid,
+                        "debug_id": _did,
+                        "address": {"type": ["string", "integer"], "description": "Start address as 0x... or integer."},
+                        "length": {"type": "integer", "description": "Number of bytes to dump. Capped by PWN_MCP_OUTPUT_MAX."},
+                        "output_filename": {"type": "string", "description": "Optional output filename under the session output directory."},
+                    },
+                    "required": ["session_id", "debug_id", "address", "length"],
+                    "additionalProperties": False,
+                },
+            ),
+        },
         "get_backtrace": {
             "handler": _h(get_backtrace),
             "schema": Tool(
@@ -879,6 +1116,36 @@ def register(app: "PwnMcpApp") -> dict[str, dict]:
                     "type": "object",
                     "properties": {"session_id": _sid, "debug_id": _did},
                     "required": ["session_id", "debug_id"],
+                    "additionalProperties": False,
+                },
+            ),
+        },
+        "analyze_heap": {
+            "handler": _h(analyze_heap),
+            "schema": Tool(
+                name="analyze_heap",
+                description="Run framework-aware heap analysis commands and return raw output plus a compact summary.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {"session_id": _sid, "debug_id": _did},
+                    "required": ["session_id", "debug_id"],
+                    "additionalProperties": False,
+                },
+            ),
+        },
+        "find_format_string_vulns": {
+            "handler": _h(find_format_string_vulns),
+            "schema": Tool(
+                name="find_format_string_vulns",
+                description="Heuristically scan a binary for printf-family format-string attack surface.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "session_id": _sid,
+                        "binary_path": {"type": "string", "description": "Binary path relative to the pwn workspace or absolute within it."},
+                        "max_findings": {"type": "integer", "default": 50, "description": "Maximum findings to return, capped at 500."},
+                    },
+                    "required": ["session_id", "binary_path"],
                     "additionalProperties": False,
                 },
             ),

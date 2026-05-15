@@ -44,6 +44,7 @@ class FridaSession:
     frida_id: str
     session_id: str
     target: str             # pid or path
+    pid: int | None = None
     device: Any = None      # frida.Device
     session: Any = None     # frida.Session
     scripts: dict[str, Any] = field(default_factory=dict)

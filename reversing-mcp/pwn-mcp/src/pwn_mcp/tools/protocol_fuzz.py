@@ -5,6 +5,7 @@ Runs user-provided boofuzz scripts for grammar-based network protocol fuzzing.
 """
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import tempfile
 from typing import Any, TYPE_CHECKING
@@ -32,6 +33,9 @@ def run_boofuzz_script(
     timeout_seconds: int | None = None,
 ) -> dict[str, Any]:
     """Run a boofuzz protocol fuzzing script with `from boofuzz import *` pre-imported."""
+    if importlib.util.find_spec("boofuzz") is None:
+        raise PwnMcpError("tool_not_found", "boofuzz_missing", "The 'boofuzz' Python package is not installed.")
+
     session = app.sessions.get(session_id)
     if session is None:
         raise PwnMcpError("not_found", "session_not_found", f"Session '{session_id}' not found.")

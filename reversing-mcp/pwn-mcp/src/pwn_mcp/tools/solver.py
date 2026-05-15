@@ -3,6 +3,7 @@ Z3 constraint solver tool: run Z3 scripts for solving exploit constraints.
 """
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import tempfile
 from typing import Any, TYPE_CHECKING
@@ -45,6 +46,9 @@ def run_z3_script(
     timeout_seconds: int | None = None,
 ) -> dict[str, Any]:
     """Run a Z3 Python script with `from z3 import *` pre-imported."""
+    if importlib.util.find_spec("z3") is None:
+        raise PwnMcpError("tool_not_found", "z3_missing", "The 'z3' Python package is not installed.")
+
     session = app.sessions.get(session_id)
     if session is None:
         raise PwnMcpError("not_found", "session_not_found", f"Session '{session_id}' not found.")

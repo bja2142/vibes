@@ -80,9 +80,8 @@ analyze_and_summarize(focus="general")
 checksec -> run_with_strace (observe syscalls)
 -> start_debug_session -> auto_set_breakpoints(filter_pattern="vuln_func")
 -> run_with_coverage (measure code reached)
--> start_afl_session (fuzz for crashes)
--> get_crash_inputs -> minimize_input
--> start_debug_session (debug crash)
+-> run_z3_script (solve path constraints/checksums)
+-> start_debug_session (debug candidate input)
 -> get_backtrace -> read_memory -> get_heap_info
 ```
 
@@ -182,7 +181,7 @@ runtime/workspace/              # Shared volume
     manifest_art_xxx.json       # Bridge manifests
     traces/                     # strace/ltrace output
     coverage/                   # drcov files
-    fuzzing/                    # AFL++ campaigns
+    protocol-fuzzing/           # boofuzz scripts and logs, if used
 ```
 
 ## Tips

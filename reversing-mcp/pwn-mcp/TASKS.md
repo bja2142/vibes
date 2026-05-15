@@ -60,12 +60,8 @@ Create the directory layout:
 **Gate:** record + replay test_hello, verify deterministic output.
 
 ### Task 7: Dockerfile — AFL++ with QEMU mode
-- AFL++ built from source with `make distrib`
-- QEMU mode built via `qemu_mode/build_qemu_support.sh`
-- CMPLOG mode enabled
-- afl-tmin, afl-cmin installed
 
-**Gate:** 10-second AFL++ QEMU campaign on test_crash_input finds at least one crash.
+Out of scope for this CTF harness. AFL++ is intentionally not installed or exposed through MCP. Keep Z3 symbolic solving, Frida, coverage, and boofuzz protocol scripts.
 
 ### Task 8: Dockerfile — exploit toolchain
 - pwntools (pip)
@@ -162,9 +158,8 @@ Backends: DynamoRIO drcov, QEMU TCG plugin, Frida Stalker.
 **Gate:** two inputs produce different coverage; diff_coverage shows correct new/dropped blocks.
 
 ### Task 17: Fuzzing tools (AFL++)
-`start_afl_session`, `get_fuzzer_status`, `get_crash_inputs`, `stop_fuzzer`, `minimize_input`
 
-**Gate:** 15-second QEMU mode campaign on test_crash_offset; crash found; minimized to ≤ 68 bytes.
+Out of scope for this CTF harness. Do not register AFL++ MCP tools.
 
 ### Task 18: Exploit assistance tools
 `checksec`, `generate_cyclic_pattern`, `find_cyclic_offset`, `find_one_gadgets`, `run_pwntools_script`, `get_rop_gadgets`
@@ -202,7 +197,7 @@ tests/test_03_rr.py              # skipped if perf_event_paranoia > 1
 tests/test_04_tracing.py
 tests/test_05_frida.py
 tests/test_06_coverage.py
-tests/test_07_fuzzing.py         # @pytest.mark.slow
+tests/test_07_protocol_fuzzing.py # optional boofuzz script probes
 tests/test_08_exploit.py
 tests/test_09_memory.py
 tests/test_10_seccomp.py
@@ -222,7 +217,7 @@ Task 1 (scaffold)
               └── Task 4 (tracing)
                     └── Task 5 (Frida/DynamoRIO)
                           └── Task 6 (rr)
-                                └── Task 7 (AFL++)
+                                └── Task 7 (AFL++, out of scope)
                                       └── Task 8 (exploit toolchain)
 
 Task 9 (test binaries) — can be done any time after Task 1
@@ -234,7 +229,7 @@ Task 10 (core infra) — can start after Task 1
               └── Task 14 (tracing)   ← needs Task 4
               └── Task 15 (Frida)     ← needs Task 5
               └── Task 16 (coverage)  ← needs Task 5 + Task 7
-        └── Task 17 (fuzzing)         ← needs Task 7
+        └── Task 17 (AFL++, out of scope)
         └── Task 18 (exploit)         ← needs Task 8
         └── Task 19 (heap/memory)     ← needs Task 12
         └── Task 20 (seccomp)         ← needs Task 8

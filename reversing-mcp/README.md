@@ -4,8 +4,8 @@ A two-server MCP system for end-to-end binary analysis: static reverse engineeri
 
 | Server | Port | Purpose | Tool Count |
 |---|---|---|---|
-| `reversing-mcp` | 6767 | Static analysis: disassembly, decompilation, semantic recovery, signatures, patching | ~82 |
-| `pwn-mcp` | 6768 | Dynamic analysis: GDB, Frida, AFL++, rr, pwntools, Z3, protocol fuzzing | 79 |
+| `reversing-mcp` | 6767 | Static analysis: disassembly, decompilation, semantic recovery, signatures, patching | 98 |
+| `pwn-mcp` | 6768 | Dynamic analysis: GDB, Frida, rr, pwntools, angr, Qiling, RE triage | 90 |
 
 Both servers share a workspace volume so static analysis results feed directly into dynamic workflows.
 
@@ -24,18 +24,18 @@ Add both servers to your MCP client (e.g. Claude Code `~/.claude.json`):
 {
   "mcpServers": {
     "reversing-mcp": {
-      "type": "sse",
-      "url": "http://127.0.0.1:6767/sse"
+      "type": "http",
+      "url": "http://127.0.0.1:6767/mcp"
     },
     "pwn-mcp": {
-      "type": "sse",
-      "url": "http://127.0.0.1:6768/sse"
+      "type": "http",
+      "url": "http://127.0.0.1:6768/mcp"
     }
   }
 }
 ```
 
-Both servers support SSE and streamable HTTP protocols at the `/sse` endpoint.
+Both servers are wired for streamable HTTP at `/mcp`. SSE compatibility remains available when a server is launched with `--transport sse` or `--transport both`.
 
 ### Place Binaries in the Workspace
 
@@ -56,7 +56,7 @@ Both servers can access files under `runtime/workspace/`.
     |    reversing-mcp      |     |       pwn-mcp         |
     |    (static only)      |     |   (dynamic execution) |
     |                       |     |                       |
-    | angr, Ghidra, YARA,   |     | GDB, Frida, AFL++,   |
+    | angr, Ghidra, YARA,   |     | GDB, Frida, rr,      |
     | FLOSS, pyelftools,    |     | rr, pwntools, Z3,    |
     | pefile, macholib      |     | boofuzz, Valgrind,   |
     |                       |     | DynamoRIO, strace    |
@@ -84,7 +84,7 @@ Static binary analysis server with persistent sessions, artifact management, and
 - **Multi-artifact**: session-wide correlation, structural diffing, dependency analysis
 - **Workflow**: annotations with revision history, session snapshots, curated exports, composite brief workflows with token budgeting
 
-### Tool Groups (82 tools)
+### Tool Groups (98 tools)
 
 | Group | Tools |
 |---|---|
@@ -122,7 +122,7 @@ Static binary analysis server with persistent sessions, artifact management, and
 
 ## pwn-mcp
 
-Dynamic analysis server for process control, debugging, instrumentation, fuzzing, and exploitation.
+Dynamic analysis server for process control, debugging, instrumentation, solving, emulation, reverse-engineering triage, and exploitation.
 
 ### Capabilities
 
@@ -131,7 +131,11 @@ Dynamic analysis server for process control, debugging, instrumentation, fuzzing
 - **Frida instrumentation**: function hooking, script injection, memory dump, export listing, call tracing
 - **Record/replay**: deterministic rr recording with reverse stepping
 - **Tracing**: strace (syscalls), ltrace (library calls), uftrace (call graphs), Valgrind (memory/performance)
-- **Fuzzing**: AFL++ with QEMU mode, boofuzz protocol fuzzing
+- **Protocol fuzzing**: boofuzz script execution for targeted network services
+- **Symbolic execution**: angr scripts, project summaries, and stdin path solving
+- **Emulation**: Unicorn blob emulation and Qiling script execution
+- **Assembly/disassembly**: Keystone/NASM assembly and Capstone/rasm2 disassembly
+- **RE triage**: capa, FLOSS, YARA, and bounded read-only radare2 commands
 - **Exploit tools**: pwntools scripting, cyclic patterns, one_gadget, ROP gadgets, checksec
 - **Constraint solving**: Z3 scripts for offset/checksum/transformation solving
 - **libc management**: version identification, download, binary patching with patchelf
@@ -139,25 +143,29 @@ Dynamic analysis server for process control, debugging, instrumentation, fuzzing
 - **Seccomp**: BPF filter analysis
 - **Cross-arch**: transparent QEMU user-mode for ARM, AArch64, MIPS, RISC-V, PowerPC, SPARC, s390x, m68k, SH4, Xtensa
 
-### Tool Groups (79 tools)
+### Tool Groups (90 tools)
 
 | Group | Tools |
 |---|---|
 | Sessions | `create_execution_session`, `list_execution_sessions`, `destroy_execution_session` |
 | Process | `launch_binary`, `send_input`, `read_output`, `get_process_state`, `terminate_process` |
-| GDB | `start_debug_session`, `stop_debug_session`, `send_gdb_command`, `set_breakpoint`, `delete_breakpoint`, `list_breakpoints`, `continue_execution`, `step_instruction`, `step_over_instruction`, `step_into`, `step_over`, `finish_function`, `run_until`, `read_registers`, `write_register`, `read_memory`, `write_memory`, `search_memory`, `get_backtrace`, `get_locals`, `evaluate_expression`, `get_memory_maps`, `get_heap_info`, `get_libc_info` |
+| GDB | `start_debug_session`, `stop_debug_session`, `send_gdb_command`, `set_breakpoint`, `delete_breakpoint`, `list_breakpoints`, `continue_execution`, `step_instruction`, `step_over_instruction`, `step_into`, `step_over`, `finish_function`, `run_until`, `read_registers`, `write_register`, `read_memory`, `write_memory`, `search_memory`, `dump_memory_region`, `get_backtrace`, `get_locals`, `evaluate_expression`, `get_memory_maps`, `get_heap_info`, `analyze_heap`, `find_format_string_vulns`, `get_libc_info` |
 | Frida | `start_frida_session`, `stop_frida_session`, `inject_script`, `hook_function`, `trace_calls`, `get_exports`, `get_memory_ranges`, `dump_memory` |
 | Record/replay | `start_rr_record`, `start_rr_replay`, `list_recordings`, `reverse_continue`, `reverse_step`, `reverse_next`, `reverse_finish` |
 | Tracing | `run_with_strace`, `run_with_ltrace`, `run_with_uftrace`, `run_with_valgrind`, `get_trace_output` |
 | Coverage | `run_with_coverage`, `get_coverage_report`, `diff_coverage` |
-| Fuzzing | `start_afl_session`, `get_fuzzer_status`, `get_crash_inputs`, `stop_fuzzer`, `minimize_input` |
 | Exploit | `checksec`, `run_pwntools_script`, `generate_cyclic_pattern`, `find_cyclic_offset`, `find_one_gadgets`, `get_rop_gadgets` |
 | Seccomp | `analyze_seccomp` |
 | Solver | `run_z3_script` |
+| Symbolic execution | `run_angr_script`, `get_angr_project_info`, `angr_find_path` |
+| Emulation | `emulate_blob_unicorn`, `run_qiling_script` |
+| Assembly/disassembly | `assemble_code`, `disassemble_bytes`, `disassemble_file_region` |
+| RE triage | `run_capa`, `run_floss`, `run_yara_scan`, `run_radare2_command` |
 | Protocol fuzzing | `run_boofuzz_script` |
 | libc tools | `identify_libc`, `list_available_libcs`, `download_libc`, `patch_binary_libc`, `get_elf_metadata` |
 | Bridge | `import_static_analysis`, `auto_set_breakpoints` |
 | Jobs | `get_job`, `cancel_job`, `list_jobs` |
+| Diagnostics | `validate_toolchain` |
 
 ### Environment Variables
 
@@ -165,7 +173,7 @@ Dynamic analysis server for process control, debugging, instrumentation, fuzzing
 |---|---|---|
 | `PWN_MCP_WORKSPACE_ROOT` | `/workspace/binaries` | Binary input directory |
 | `PWN_MCP_OUTPUT_ROOT` | `/workspace/dynamic-output` | Output directory for traces, coverage, etc. |
-| `PWN_MCP_SESSIONS_ROOT` | `/tmp/pwn-mcp-sessions` | Session working directories |
+| `PWN_MCP_SESSIONS_ROOT` | `/tmp/pwn-mcp-sessions` | Session working directories. The compose file places these under the writable dynamic output volume. |
 | `PWN_MCP_LOG_LEVEL` | `INFO` | Server log level |
 | `PWN_MCP_PORT` | `6768` | Server port |
 | `GDBINIT_FRAMEWORK` | `gef` | GDB enhancement framework (`gef` or `pwndbg`) |
@@ -219,13 +227,13 @@ create_session -> add_artifact -> triage_artifact -> start_artifact_analysis
 -> run_pwntools_script (craft exploit)
 ```
 
-### 3. Fuzzing Campaign
+### 3. Coverage And Constraint Triage
 
 ```
 (pwn-mcp) create_execution_session -> checksec
--> start_afl_session -> get_fuzzer_status -> get_crash_inputs
--> minimize_input -> start_debug_session (on crash input)
--> get_backtrace -> read_registers
+-> run_with_coverage -> get_coverage_report
+-> run_z3_script (solve branch/checksum constraints)
+-> start_debug_session -> get_backtrace -> read_registers
 ```
 
 ### 4. CTF Pwn Challenge

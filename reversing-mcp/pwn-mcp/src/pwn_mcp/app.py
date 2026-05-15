@@ -36,9 +36,17 @@ class PwnMcpApp:
 
     def _register_tools(self) -> None:
         """Import and register all tool modules."""
-        from .tools import process, gdb, tracing, exploit, seccomp, rr, coverage, fuzzing, frida_tools, bridge, libc_tools, solver, protocol_fuzz
+        from .tools import (
+            process, gdb, tracing, exploit, seccomp, rr, coverage, frida_tools,
+            bridge, libc_tools, solver, protocol_fuzz, symbolic, emulation,
+            assembly, re_triage, toolchain,
+        )
 
-        for module in (process, gdb, tracing, exploit, seccomp, rr, coverage, fuzzing, frida_tools, bridge, libc_tools, solver, protocol_fuzz):
+        for module in (
+            process, gdb, tracing, exploit, seccomp, rr, coverage, frida_tools,
+            bridge, libc_tools, solver, protocol_fuzz, symbolic, emulation,
+            assembly, re_triage, toolchain,
+        ):
             tools = module.register(self)
             self._tools.update(tools)
 
@@ -51,7 +59,7 @@ class PwnMcpApp:
                 "handler": self._get_job,
                 "schema": Tool(
                     name="get_job",
-                    description="Get the status and result of an async job (e.g. fuzzing).",
+                    description="Get the status and result of an async job.",
                     inputSchema={
                         "type": "object",
                         "properties": {"job_id": {"type": "string"}},
@@ -126,8 +134,9 @@ class PwnMcpApp:
             name: which_tool(name) is not None
             for name in [
                 "gdb-multiarch", "rr", "strace", "ltrace", "valgrind",
-                "uftrace", "afl-fuzz", "frida", "checksec",
+                "uftrace", "frida", "checksec",
                 "one_gadget", "ropper", "seccomp-tools",
+                "capa", "floss", "yara", "r2", "rabin2", "rasm2", "nasm",
             ]
         }
 

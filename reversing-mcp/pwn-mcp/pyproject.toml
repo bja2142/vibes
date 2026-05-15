@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pwn-mcp"
 version = "0.1.0"
-description = "Dynamic analysis MCP server — process control, GDB, Frida, AFL++, and exploit toolchain"
+description = "Dynamic analysis MCP server — process control, GDB, Frida, emulation, symbolic solving, RE triage, and exploit toolchain"
 requires-python = ">=3.11"
 dependencies = [
     "mcp[cli]>=1.0.0",
@@ -29,7 +29,7 @@ where = ["src"]
 testpaths = ["tests"]
 timeout = 120
 markers = [
-    "slow: marks tests as slow (fuzzing campaigns, long traces)",
+    "slow: marks tests as slow (long traces or integration probes)",
     "requires_rr: marks tests that need perf_event_paranoia <= 1",
     "requires_root: marks tests that need elevated privileges",
 ]

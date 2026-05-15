@@ -6,8 +6,10 @@ in the session output directory for later retrieval.
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import uuid
+from collections import Counter
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -31,6 +33,51 @@ def _require_tool(name: str, label: str) -> str:
     if path is None:
         raise PwnMcpError("tool_not_found", f"{label}_missing", f"'{name}' is not installed.")
     return path
+
+
+def _summarize_strace(text: str) -> dict[str, Any]:
+    syscall_re = re.compile(r"^\s*(?:\[[^\]]+\]\s*)?(?:\d+\s+)?([A-Za-z_][A-Za-z0-9_]*)\(")
+    counts: Counter[str] = Counter()
+    errors: Counter[str] = Counter()
+    for line in text.splitlines():
+        match = syscall_re.match(line)
+        if not match:
+            continue
+        syscall = match.group(1)
+        counts[syscall] += 1
+        err_match = re.search(r"=\s*-1\s+([A-Z][A-Z0-9_]+)", line)
+        if err_match:
+            errors[err_match.group(1)] += 1
+    return {
+        "syscall_count": sum(counts.values()),
+        "top_syscalls": [{"name": name, "count": count} for name, count in counts.most_common(20)],
+        "errors": [{"errno": name, "count": count} for name, count in errors.most_common(20)],
+    }
+
+
+def _summarize_valgrind(text: str) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    error_match = re.search(r"ERROR SUMMARY:\s+(\d+)\s+errors?", text)
+    if error_match:
+        summary["error_count"] = int(error_match.group(1))
+    leak_match = re.search(r"definitely lost:\s+([0-9,]+)\s+bytes\s+in\s+([0-9,]+)\s+blocks", text)
+    if leak_match:
+        summary["definitely_lost_bytes"] = int(leak_match.group(1).replace(",", ""))
+        summary["definitely_lost_blocks"] = int(leak_match.group(2).replace(",", ""))
+    invalid_reads = len(re.findall(r"Invalid read", text))
+    invalid_writes = len(re.findall(r"Invalid write", text))
+    if invalid_reads or invalid_writes:
+        summary["invalid_reads"] = invalid_reads
+        summary["invalid_writes"] = invalid_writes
+    return summary
+
+
+def _trace_summary(label: str, text: str) -> dict[str, Any]:
+    if label == "strace":
+        return _summarize_strace(text)
+    if label.startswith("valgrind"):
+        return _summarize_valgrind(text)
+    return {}
 
 
 def _run_tracer(
@@ -68,6 +115,7 @@ def _run_tracer(
     out_file.write_bytes(raw)
 
     text, truncated = truncate_output(raw, DEFAULT_OUTPUT_MAX_BYTES)
+    decoded = text.decode("utf-8", errors="replace")
     return {
         "ok": True,
         "result": {
@@ -75,7 +123,8 @@ def _run_tracer(
             "output_file": str(out_file),
             "exit_code": proc.returncode,
             "stdout": proc.stdout.decode("utf-8", errors="replace")[:4096],
-            "trace_output": text.decode("utf-8", errors="replace"),
+            "trace_output": decoded,
+            "summary": _trace_summary(label, decoded),
             "truncated": truncated,
         },
     }
