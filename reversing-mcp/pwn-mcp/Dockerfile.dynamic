@@ -12,7 +12,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 WORKDIR /app
 
 # ── Phase 1: base OS + Python + QEMU user-mode ───────────────────────────────
-RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
+RUN apt-get update \
     && apt-get install -y --no-install-recommends \
     # Python
     python3 python3-dev python3-pip python3-venv \
@@ -30,7 +30,7 @@ RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false upd
 RUN python3 --version && qemu-x86_64-static --version
 
 # ── Phase 2: GDB multiarch + GEF + pwndbg ────────────────────────────────────
-RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
+RUN apt-get update \
     && apt-get install -y --no-install-recommends \
     gdb-multiarch \
     gdbserver \
@@ -62,7 +62,7 @@ exec gdb-multiarch "$@"\n' > /usr/local/bin/gdb-fw \
 RUN gdb-multiarch --version
 
 # ── Phase 3: tracing tools ────────────────────────────────────────────────────
-RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
+RUN apt-get update \
     && apt-get install -y --no-install-recommends \
     strace \
     ltrace \
@@ -104,7 +104,7 @@ ENV PATH="/opt/dynamorio/bin64:${PATH}"
 RUN frida --version && drrun -version
 
 # ── Phase 5: rr record/replay (x86/x86_64 only) ──────────────────────────────
-RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
+RUN apt-get update \
     && apt-get install -y --no-install-recommends \
     capnproto libcapnp-dev python3-pexpect \
     && rm -rf /var/lib/apt/lists/*
@@ -122,7 +122,7 @@ RUN set -eux; \
 RUN rr --version
 
 # ── Phase 6: exploit toolchain ────────────────────────────────────────────────
-RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
+RUN apt-get update \
     && apt-get install -y --no-install-recommends \
     ruby ruby-dev \
     rubygems \
@@ -147,7 +147,11 @@ RUN wget -qO /usr/local/bin/checksec \
     && chmod +x /usr/local/bin/checksec
 
 # glibc-all-in-one for libc version swapping
-RUN git clone --depth=1 https://github.com/matrix1001/glibc-all-in-one /opt/glibc-all-in-one
+RUN git clone --depth=1 https://github.com/matrix1001/glibc-all-in-one /opt/glibc-all-in-one \
+    && cd /opt/glibc-all-in-one \
+    && ./update_list \
+    && mkdir -p libs \
+    && chmod -R a+rwX /opt/glibc-all-in-one
 
 # libc-database for leak-based identification
 RUN git clone --depth=1 https://github.com/niklasb/libc-database /opt/libc-database
@@ -179,7 +183,7 @@ COPY tests ./tests
 COPY test_binaries ./test_binaries
 
 # Compile test binaries
-RUN apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false update \
+RUN apt-get update \
     && apt-get install -y --no-install-recommends \
     gcc-aarch64-linux-gnu \
     gcc-mipsel-linux-gnu \

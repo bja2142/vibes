@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import shutil
 import struct
 from pathlib import Path
@@ -73,8 +74,17 @@ def detect_arch(path: Path) -> str:
 
 
 def is_native_arch(arch: str) -> bool:
-    """Return True if arch runs natively on this host (x86_64 assumed)."""
-    return arch in ("x86_64", "x86")
+    """Return True if arch runs natively on this host."""
+    machine = platform.machine().lower()
+    if machine in {"x86_64", "amd64"}:
+        return arch == "x86_64"
+    if machine in {"aarch64", "arm64"}:
+        return arch == "aarch64"
+    if machine.startswith("arm"):
+        return arch == "arm"
+    if machine in {"i386", "i686"}:
+        return arch == "x86"
+    return arch == machine
 
 
 def truncate_output(data: bytes, max_bytes: int) -> tuple[bytes, bool]:

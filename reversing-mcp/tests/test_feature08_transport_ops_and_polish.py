@@ -40,6 +40,10 @@ def _sample_file(workspace_root: Path, name: str = "sample.bin") -> Path:
     return sample_path
 
 
+def _reset_mcp_http_session_manager() -> None:
+    server.mcp._session_manager = None
+
+
 def _build_sample_binary(workspace_root: Path, name: str = "feature08_sample") -> Path:
     source = workspace_root / f"{name}.c"
     binary = workspace_root / name
@@ -67,6 +71,7 @@ def _build_sample_binary(workspace_root: Path, name: str = "feature08_sample") -
 
 
 def test_http_transport_auth_and_rate_limit(tmp_path: Path, monkeypatch) -> None:
+    _reset_mcp_http_session_manager()
     monkeypatch.setattr(server, "APP", ReversingMCPApp(workspace_root=tmp_path))
     monkeypatch.setenv("REVERSING_MCP_HTTP_TOKENS", "tenant-a=secret-token")
     monkeypatch.setenv("REVERSING_MCP_HTTP_REQUIRE_AUTH", "true")
@@ -87,6 +92,7 @@ def test_http_transport_auth_and_rate_limit(tmp_path: Path, monkeypatch) -> None
         limited = client.get("/mcp", headers=headers)
         assert limited.status_code == 429
         assert limited.json()["error"]["code"] == "http_rate_limit_exceeded"
+    _reset_mcp_http_session_manager()
 
 
 def test_http_tokens_do_not_enable_auth_without_explicit_flag(tmp_path: Path, monkeypatch) -> None:
@@ -97,6 +103,17 @@ def test_http_tokens_do_not_enable_auth_without_explicit_flag(tmp_path: Path, mo
     assert context.authenticated is False
     assert context.tenant_id == "anonymous"
     assert context.agent_id == "agent-a"
+
+
+def test_http_transport_accepts_docker_service_host_header(tmp_path: Path, monkeypatch) -> None:
+    _reset_mcp_http_session_manager()
+    monkeypatch.setattr(server, "APP", ReversingMCPApp(workspace_root=tmp_path))
+
+    with TestClient(build_network_app("http"), base_url="http://reversing-mcp:6767") as client:
+        response = client.get("/mcp")
+        assert response.status_code != 421
+        assert response.text != "Invalid Host header"
+    _reset_mcp_http_session_manager()
 
 
 def test_http_session_and_job_isolation(tmp_path: Path) -> None:

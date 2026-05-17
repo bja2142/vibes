@@ -6,7 +6,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .analysis import analysis_backend_status
-from .ghidra import ghidra_available, ghidra_decompile_function, ghidra_export_analysis, ghidra_run_custom_script
+from .ghidra import (
+    ghidra_available,
+    ghidra_decompile_function,
+    ghidra_decompiler_available,
+    ghidra_export_analysis,
+    ghidra_run_custom_script,
+    pyghidra_available,
+)
 from .config import SERVER_NAME, SERVER_VERSION
 from .errors import StructuredToolError
 from .feature07 import (
@@ -727,8 +734,10 @@ def _available_analysis_backends() -> list[dict[str, Any]]:
                 "name": "ghidra-headless",
                 "available": True,
                 "exact": False,
-                "notes": "Installed headless Ghidra backend available in the container for future analysis and scripting workflows.",
+                "notes": "Installed Ghidra backend available in the container for analysis and scripting workflows.",
                 "path": str(ghidra_headless),
+                "pyghidra_available": pyghidra_available(),
+                "native_decompiler_available": ghidra_decompiler_available(),
             }
         )
     return backends

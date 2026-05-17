@@ -361,7 +361,13 @@ def run_until(
     location: str,
 ) -> dict[str, Any]:
     mi = _get_mi(app, session_id, debug_id)
-    result = mi.send(f'exec-until "{location}"')
+    stripped = location.strip()
+    try:
+        int(stripped.lstrip("*"), 0)
+        target = stripped if stripped.startswith("*") else f"*{stripped}"
+    except ValueError:
+        target = stripped
+    result = mi.send(f"exec-until {target}")
     return {"ok": True, "result": result}
 
 
@@ -373,8 +379,20 @@ def read_registers(
 ) -> dict[str, Any]:
     mi = _get_mi(app, session_id, debug_id)
     if register_names:
-        names_str = " ".join(f'"{r}"' for r in register_names)
-        result = mi.send(f"data-list-register-values x {names_str}")
+        names_result = mi.send("data-list-register-names")
+        names = re.findall(r'"([^"]*)"', names_result.get("payload", ""))
+        index_by_name = {name.lower(): index for index, name in enumerate(names) if name}
+        missing = [name for name in register_names if name.lower() not in index_by_name]
+        if missing:
+            raise PwnMcpError(
+                "invalid_request",
+                "unknown_register",
+                f"Unknown register name(s): {', '.join(missing)}.",
+                details={"available_registers": [name for name in names if name]},
+            )
+        indices = " ".join(str(index_by_name[name.lower()]) for name in register_names)
+        result = mi.send(f"data-list-register-values x {indices}")
+        result["requested_registers"] = register_names
     else:
         result = mi.send("data-list-register-values x")
     return {"ok": True, "result": result}
@@ -388,7 +406,10 @@ def write_register(
     value: str,
 ) -> dict[str, Any]:
     mi = _get_mi(app, session_id, debug_id)
-    result = mi.send(f'gdb-set $"{register}" = {value}')
+    normalized = register[1:] if register.startswith("$") else register
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", normalized):
+        raise PwnMcpError("invalid_request", "invalid_register_name", f"Invalid register name: {register!r}.")
+    result = mi.send(f"gdb-set ${normalized} = {value}")
     return {"ok": True, "result": result}
 
 
@@ -426,8 +447,22 @@ def search_memory(
     pattern_hex: str,
 ) -> dict[str, Any]:
     mi = _get_mi(app, session_id, debug_id)
-    result = mi.send(f"data-find {start_address} {end_address} {pattern_hex}")
-    return {"ok": True, "result": result}
+    cleaned = re.sub(r"[^0-9a-fA-F]", "", pattern_hex or "")
+    if not cleaned or len(cleaned) % 2:
+        raise PwnMcpError("invalid_request", "invalid_hex_pattern", "pattern_hex must contain whole bytes.")
+    byte_args = ", ".join(f"0x{cleaned[index:index + 2]}" for index in range(0, len(cleaned), 2))
+    output = mi.exec_cli(f"find /b {start_address}, {end_address}, {byte_args}")
+    matches = re.findall(r"0x[0-9a-fA-F]+", output)
+    return {
+        "ok": True,
+        "result": {
+            "start_address": start_address,
+            "end_address": end_address,
+            "pattern_hex": cleaned.lower(),
+            "matches": matches,
+            "output": output,
+        },
+    }
 
 
 def dump_memory_region(

@@ -3,6 +3,7 @@ Test 04 — GDB integration: debug sessions, breakpoints, stepping, memory.
 """
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 
@@ -119,6 +120,51 @@ def test_run_to_main_and_read_registers(app, session):
             "debug_id": debug_id,
         })
         assert regs["ok"]
+
+        named_regs = app.dispatch("read_registers", {
+            "session_id": session.session_id,
+            "debug_id": debug_id,
+            "register_names": ["pc"],
+        })
+        assert named_regs["ok"]
+        assert named_regs["result"]["class"] == "done"
+
+        sp = app.dispatch("evaluate_expression", {
+            "session_id": session.session_id,
+            "debug_id": debug_id,
+            "expression": "$sp",
+        })
+        match = re.search(r'value="(0x[0-9a-fA-F]+)', sp["result"]["payload"])
+        assert match
+        stack_addr = match.group(1)
+
+        write_reg = app.dispatch("write_register", {
+            "session_id": session.session_id,
+            "debug_id": debug_id,
+            "register": "x2",
+            "value": "0x1234",
+        })
+        assert write_reg["ok"]
+        assert write_reg["result"]["class"] == "done"
+
+        write_mem = app.dispatch("write_memory", {
+            "session_id": session.session_id,
+            "debug_id": debug_id,
+            "address": stack_addr,
+            "data_hex": "4142",
+        })
+        assert write_mem["ok"]
+        assert write_mem["result"]["class"] == "done"
+
+        search = app.dispatch("search_memory", {
+            "session_id": session.session_id,
+            "debug_id": debug_id,
+            "start_address": stack_addr,
+            "end_address": hex(int(stack_addr, 16) + 0x100),
+            "pattern_hex": "4142",
+        })
+        assert search["ok"]
+        assert search["result"]["matches"]
 
         # Get backtrace
         bt = app.dispatch("get_backtrace", {

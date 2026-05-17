@@ -11,6 +11,7 @@ from typing import Annotated, Any
 
 from pydantic import Field
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from .app import ReversingMCPApp
 from .errors import StructuredToolError
@@ -19,7 +20,30 @@ from .transport import REQUEST_RATE_LIMITER, RequestContext, load_http_transport
 
 LOGGER = logging.getLogger("reversing_mcp")
 APP = ReversingMCPApp()
-mcp = FastMCP("reversing-mcp")
+
+
+def _transport_security_settings() -> TransportSecuritySettings:
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[
+            "127.0.0.1:*",
+            "localhost:*",
+            "[::1]:*",
+            "reversing-mcp:*",
+            "ben-mcp-reversing-mcp:*",
+            "testserver",
+        ],
+        allowed_origins=[
+            "http://127.0.0.1:*",
+            "http://localhost:*",
+            "http://[::1]:*",
+            "http://reversing-mcp:*",
+            "http://ben-mcp-reversing-mcp:*",
+        ],
+    )
+
+
+mcp = FastMCP("reversing-mcp", host="0.0.0.0", transport_security=_transport_security_settings())
 
 
 def configure_logging(level_name: str | None = None) -> int:

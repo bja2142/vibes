@@ -106,6 +106,10 @@ EXPECTED_MCP_TOOLS = {
     "trace_capability",
     "prepare_patch_plan",
     "artifact_relationship_brief",
+    "ghidra_decompile",
+    "ghidra_analyze",
+    "run_ghidra_script",
+    "export_dynamic_manifest",
 }
 
 
@@ -719,6 +723,33 @@ async def _exercise_all_exposed_tools_via_mcp_wrappers(tmp_path: Path, monkeypat
     )
     assert relationship_brief["ok"] is True
     assert relationship_brief["result"]["relationship_brief"]["diff_candidates"]["items"]
+
+    dynamic_manifest_path = tmp_path / "exports" / "dynamic-manifest.json"
+    dynamic_manifest = await _acall(invoked, "export_dynamic_manifest", session_id, binary_artifact, str(dynamic_manifest_path))
+    assert dynamic_manifest["ok"] is True
+    assert dynamic_manifest_path.exists()
+
+    ghidra_analysis = await _acall(invoked, "ghidra_analyze", session_id, binary_artifact, 60)
+    if ghidra_analysis["ok"]:
+        assert "functions" in ghidra_analysis["result"]
+    else:
+        assert ghidra_analysis["error"]["code"] in {"ghidra_not_installed", "pyghidra_not_installed"}
+
+    ghidra_decompilation = await _acall(invoked, "ghidra_decompile", session_id, binary_artifact, function["address"], 60)
+    if ghidra_decompilation["ok"]:
+        assert "source" in ghidra_decompilation["result"]
+    else:
+        assert ghidra_decompilation["error"]["code"] in {
+            "ghidra_not_installed",
+            "pyghidra_not_installed",
+            "ghidra_decompiler_unavailable",
+        }
+
+    ghidra_script = await _acall(invoked, "run_ghidra_script", session_id, binary_artifact, "print('surface-contract')", 60)
+    if ghidra_script["ok"]:
+        assert "surface-contract" in ghidra_script["result"]["stdout"]
+    else:
+        assert ghidra_script["error"]["code"] in {"ghidra_not_installed", "pyghidra_not_installed"}
 
     command_log_path = tmp_path / "exports" / "command-log.txt"
     command_log = await _acall(invoked, "export_command_log", session_id, "text", str(command_log_path))

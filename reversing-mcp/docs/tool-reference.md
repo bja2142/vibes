@@ -450,7 +450,7 @@ Shared controls:
 - Purpose: decompile a function using the Ghidra headless decompiler
 - Use when: angr decompilation is insufficient for complex binaries, or when higher-quality pseudo-C output is needed
 - Prerequisites: `add_artifact`
-- Notes: requires Ghidra to be installed in the container (`/opt/ghidra`)
+- Notes: requires Ghidra to be installed in the container (`/opt/ghidra`) and a native Ghidra decompiler executable for the container architecture. ARM64 images may return `ghidra_decompiler_unavailable` because upstream Ghidra does not ship `linux_arm_64/decompile`.
 
 ### `ghidra_analyze(session_id, artifact_id, timeout_seconds?)`
 
@@ -462,7 +462,7 @@ Shared controls:
 
 - Purpose: run a custom Ghidra Python script against an artifact binary
 - Use when: you need specialized analysis not covered by the built-in tools
-- Notes: script runs in Ghidra's Jython environment with full Ghidra API access
+- Notes: script runs through PyGhidra with `api`, `program`, and `currentProgram` available in the script globals
 
 ## Cross-Server Bridge
 

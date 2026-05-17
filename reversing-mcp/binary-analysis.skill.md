@@ -31,7 +31,7 @@ These servers share a workspace volume. Static analysis results can be exported 
 ## IMPORTANT RULES
 
 1. **Always create a session first.** reversing-mcp uses `create_session`, pwn-mcp uses `create_execution_session`. Every other tool requires a session_id.
-2. **Binaries must be in the workspace.** Paths are relative to `/workspace` (reversing-mcp) or `/workspace/binaries` (pwn-mcp). Guide the user to place files there.
+2. **Binaries must be in the workspace.** In this ben-mcp port, both servers use `$BEN_MCP_REPO_ROOT/agent-sandbox-work` as their workspace root. Host MCP pulls are visible under `mcp-artifacts/` inside that shared workspace.
 3. **Analysis is async.** After `start_artifact_analysis`, poll with `get_job` until `status: "completed"`. Or use `analyze_and_summarize` which waits automatically.
 4. **IDs are generation-scoped.** `function_id` and `string_id` values expire when an artifact is reanalyzed. Always re-query after reanalysis.
 5. **Use composite briefs to save tokens.** Prefer `ingest_and_triage_artifact`, `analyze_and_summarize`, `hunt_interesting_regions` over manual multi-step sequences when doing initial investigation.
@@ -237,9 +237,9 @@ These tools reduce token usage and round trips. They share these optional contro
 
 | Tool | Required Params | Purpose |
 |------|----------------|---------|
-| `ghidra_decompile` | `session_id`, `artifact_id`, `address` | Decompile function via Ghidra (higher quality than angr). |
+| `ghidra_decompile` | `session_id`, `artifact_id`, `address` | Decompile function via Ghidra when the image has a native Ghidra decompiler executable for the container architecture. |
 | `ghidra_analyze` | `session_id`, `artifact_id` | Full Ghidra analysis: functions, strings, imports, sections. |
-| `run_ghidra_script` | `session_id`, `artifact_id`, `script` | Custom Ghidra Python/Jython script. |
+| `run_ghidra_script` | `session_id`, `artifact_id`, `script` | Custom PyGhidra Python script with `api`, `program`, and `currentProgram` available. |
 
 ### Cross-Server Bridge
 
@@ -665,7 +665,7 @@ Key metrics:
 
 1. **Analysis takes time.** `start_artifact_analysis` returns immediately. You MUST poll `get_job` or use `analyze_and_summarize` with `wait_timeout_seconds`. Calling function-level tools before analysis completes returns empty results.
 
-2. **Ghidra requires installation.** `ghidra_decompile`, `ghidra_analyze`, `run_ghidra_script` fail with `ghidra_not_installed` if Ghidra is not in the container. The Docker image includes it, but standalone installs may not.
+2. **Ghidra requires installation.** `ghidra_decompile`, `ghidra_analyze`, `run_ghidra_script` fail with `ghidra_not_installed` if Ghidra is not in the container. `ghidra_analyze` and `run_ghidra_script` use PyGhidra. `ghidra_decompile` also requires Ghidra's native decompiler executable for the container architecture; the ARM64 image reports `ghidra_decompiler_unavailable` because upstream Ghidra does not ship `linux_arm_64/decompile`.
 
 3. **rr is x86/x64 only.** `start_rr_record` fails on ARM/MIPS/etc. Also requires `perf_event_paranoid <= 1` on the host.
 

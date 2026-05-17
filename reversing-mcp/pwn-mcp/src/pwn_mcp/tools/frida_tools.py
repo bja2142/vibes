@@ -291,15 +291,26 @@ def dump_memory(
     if length > 65536:
         raise PwnMcpError("invalid_request", "dump_too_large", "Max dump size is 64KB.")
 
-    messages: list = []
+    data_chunks: list[bytes] = []
+    errors: list[str] = []
 
     def on_msg(msg, data):
         if msg.get("type") == "send":
-            messages.append(data)
+            payload = msg.get("payload") or {}
+            if isinstance(payload, dict) and payload.get("ok") is False:
+                errors.append(str(payload.get("error") or "unknown Frida memory read error"))
+            elif data:
+                data_chunks.append(bytes(data))
+        elif msg.get("type") == "error":
+            errors.append(str(msg.get("description") or msg.get("stack") or "Frida script error"))
 
     script_src = f"""
-var buf = Memory.readByteArray(ptr('{address}'), {length});
-send(null, buf);
+try {{
+    var buf = ptr('{address}').readByteArray({length});
+    send({{ok: true}}, buf);
+}} catch (e) {{
+    send({{ok: false, error: e.message}});
+}}
 """
     script = fs.session.create_script(script_src)
     script.on("message", on_msg)
@@ -309,7 +320,15 @@ send(null, buf);
     time.sleep(0.3)
     script.unload()
 
-    raw = messages[0] if messages else b""
+    if errors and not data_chunks:
+        raise PwnMcpError(
+            "backend_failure",
+            "frida_memory_read_failed",
+            errors[0],
+            details={"address": address, "length": length},
+        )
+
+    raw = data_chunks[0] if data_chunks else b""
     return {
         "ok": True,
         "result": {
@@ -337,8 +356,11 @@ def stop_frida_session(
     errors = []
 
     # Unload all scripts
-    for name, script in list(fs.scripts.items()):
+    for name, script_entry in list(fs.scripts.items()):
         try:
+            script = script_entry.get("script") if isinstance(script_entry, dict) else script_entry
+            if script is None:
+                continue
             script.unload()
         except Exception as exc:
             errors.append(f"Script unload '{name}': {exc}")

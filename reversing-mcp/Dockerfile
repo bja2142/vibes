@@ -41,6 +41,7 @@ RUN set -eux; \
     rm -f /tmp/ghidra.zip
 
 RUN python -m pip install --upgrade pip \
+    && python -m pip install --no-index -f /opt/ghidra/Ghidra/Features/PyGhidra/pypkg/dist pyghidra \
     && python -c "import pathlib, tomllib; data = tomllib.loads(pathlib.Path('pyproject.toml').read_text()); requirements = list(data['project']['dependencies']); requirements.extend(data['project'].get('optional-dependencies', {}).get('dev', [])); pathlib.Path('/tmp/requirements.txt').write_text('\n'.join(requirements) + '\n')" \
     && python -m pip install -r /tmp/requirements.txt
 

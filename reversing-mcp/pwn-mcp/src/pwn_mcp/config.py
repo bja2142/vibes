@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import platform
 from pathlib import Path
 
 
@@ -61,10 +62,14 @@ DEFAULT_OUTPUT_MAX_BYTES       = _env_int("PWN_MCP_OUTPUT_MAX",     1024 * 1024)
 DEFAULT_MAX_SESSIONS           = _env_int("PWN_MCP_MAX_SESSIONS",   16)
 DEFAULT_SCRIPT_TIMEOUT_SECONDS = _env_int("PWN_MCP_SCRIPT_TIMEOUT", 30)
 
-# QEMU user-mode binary prefix map: ELF machine type → qemu-user binary
+# QEMU user-mode binary prefix map: ELF machine type -> qemu-user binary.
+#
+# The native architecture is normalized below. This matters for ARM64 hosts:
+# tracing a native AArch64 target through qemu-aarch64 causes tools such as
+# ltrace to trace QEMU instead of the challenge binary.
 QEMU_USER_MAP: dict[str, str] = {
     "x86":      "qemu-i386",
-    "x86_64":   "",              # native — no prefix needed
+    "x86_64":   "qemu-x86_64",
     "arm":      "qemu-arm",
     "aarch64":  "qemu-aarch64",
     "mips":     "qemu-mips",
@@ -84,3 +89,23 @@ QEMU_USER_MAP: dict[str, str] = {
     "xtensa":   "qemu-xtensa",
     "alpha":    "qemu-alpha",
 }
+
+
+def _native_arches() -> set[str]:
+    machine = platform.machine().lower()
+    if machine in {"x86_64", "amd64"}:
+        return {"x86_64"}
+    if machine in {"aarch64", "arm64"}:
+        return {"aarch64"}
+    if machine.startswith("arm"):
+        return {"arm"}
+    if machine in {"i386", "i686"}:
+        return {"x86"}
+    if machine in QEMU_USER_MAP:
+        return {machine}
+    return set()
+
+
+for _arch in _native_arches():
+    if _arch in QEMU_USER_MAP:
+        QEMU_USER_MAP[_arch] = ""
